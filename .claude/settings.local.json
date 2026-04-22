@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(yarn --version)",
+      "Bash(pip --version)",
+      "Bash(npm *)",
+      "Bash(mongod --version)",
+      "Bash(mongosh --version)",
+      "Bash(docker *)",
+      "Bash(sed 's/@api_router\\\\.post\\(\"//')",
+      "Bash(python *)",
+      "Bash(yarn add *)",
+      "Bash(sed 's/@app\\\\.//')",
+      "Bash(node -e \"require\\('./src/App.js'\\)\")"
+    ]
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "typography": {
+    "fonts": {
+      "headings": {
+        "family": "Manrope, sans-serif",
+        "weights": ["600", "700", "800"],
+        "usage": "Page titles, section headers, modal titles"
+      },
+      "body": {
+        "family": "Inter, sans-serif",
+        "weights": ["400", "500"],
+        "usage": "General text, form labels, table content"
+      },
+      "mono": {
+        "family": "JetBrains Mono, monospace",
+        "weights": ["400", "500"],
+        "usage": "Asset tags, serial numbers, IP addresses, code snippets"
+      }
+    },
+    "scale": {
+      "h1": "text-3xl md:text-4xl font-bold tracking-tight",
+      "h2": "text-2xl font-semibold tracking-tight",
+      "h3": "text-xl font-semibold tracking-tight",
+      "body_lg": "text-lg leading-relaxed",
+      "body_base": "text-base leading-relaxed",
+      "body_sm": "text-sm leading-normal",
+      "caption": "text-xs text-muted-foreground uppercase tracking-wider"
+    }
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "DEFAULT": "#4F46E5",
+        "foreground": "#FFFFFF",
+        "hover": "#4338CA",
+        "description": "Electric Indigo - Use for primary actions, active states, and key highlights."
+      },
+      "secondary": {
+        "DEFAULT": "#F1F5F9",
+        "foreground": "#0F172A",
+        "description": "Slate 100 - Use for secondary buttons, backgrounds of subtle elements."
+      },
+      "background": {
+        "app": "#F8FAFC",
+        "card": "#FFFFFF",
+        "sidebar": "#0F172A"
+      },
+      "semantic": {
+        "success": {
+          "bg": "#DCFCE7",
+          "text": "#166534",
+          "border": "#86EFAC"
+        },
+        "warning": {
+          "bg": "#FEF9C3",
+          "text": "#854D0E",
+          "border": "#FDE047"
+        },
+        "error": {
+          "bg": "#FEE2E2",
+          "text": "#991B1B",
+          "border": "#FCA5A5"
+        },
+        "info": {
+          "bg": "#E0F2FE",
+          "text": "#075985",
+          "border": "#7DD3FC"
+        }
+      }
+    },
+    "gradients": {
+      "login_overlay": "linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(79, 70, 229, 0.8) 100%)",
+      "subtle_glow": "radial-gradient(circle at 50% 0%, rgba(79, 70, 229, 0.1) 0%, transparent 70%)"
+    }
+  },
+  "layout": {
+    "grid_system": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-12 gap-6",
+      "form_2_col": "grid grid-cols-1 md:grid-cols-2 gap-6",
+      "card_grid": "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+    },
+    "spacing": {
+      "page_padding": "p-6 md:p-8 lg:p-10",
+      "card_padding": "p-6",
+      "section_gap": "gap-8"
+    },
+    "containers": {
+      "max_width": "max-w-7xl mx-auto",
+      "sidebar_width": "w-64"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 rounded-md font-medium transition-all shadow-sm hover:shadow-md active:scale-95",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 px-4 py-2 rounded-md font-medium transition-all",
+      "ghost": "hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 rounded-md font-medium transition-colors",
+      "destructive": "bg-destructive text-destructive-foreground hover:bg-destructive/90 h-10 px-4 py-2 rounded-md font-medium shadow-sm"
+    },
+    "cards": {
+      "base": "bg-card text-card-foreground rounded-xl border border-border/50 shadow-sm hover:shadow-md transition-shadow duration-200",
+      "header": "flex flex-col space-y-1.5 p-6",
+      "content": "p-6 pt-0"
+    },
+    "inputs": {
+      "base": "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200 focus:border-primary"
+    },
+    "tables": {
+      "wrapper": "relative w-full overflow-auto rounded-md border border-border bg-white shadow-sm",
+      "header": "bg-slate-50/50 sticky top-0 z-10",
+      "row": "hover:bg-slate-50/50 transition-colors data-[state=selected]:bg-muted",
+      "cell": "p-4 align-middle [&:has([role=checkbox])]:pr-0 text-sm"
+    },
+    "badges": {
+      "base": "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+      "outline": "text-foreground"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "header": "bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-50",
+      "overlay": "bg-black/20 backdrop-blur-sm"
+    },
+    "shadows": {
+      "card": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+      "hover": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -2px rgb(0 0 0 / 0.05)",
+      "dropdown": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)"
+    },
+    "borders": {
+      "subtle": "border border-slate-200",
+      "active": "border-primary"
+    }
+  },
+  "assets": {
+    "images": {
+      "login_bg": {
+        "url": "https://images.unsplash.com/photo-1680992046626-418f7e910589?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwyfHxzZXJ2ZXIlMjByb29tJTIwYWJzdHJhY3QlMjB0ZWNobm9sb2d5fGVufDB8fHx8MTc2OTMwNzMwMXww&ixlib=rb-4.1.0&q=85",
+        "alt": "Server room abstract technology background",
+        "usage": "Login page background with overlay"
+      },
+      "dashboard_hero": {
+        "url": "https://images.unsplash.com/photo-1622131815526-eaae1e615381?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NjZ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBsYXB0b3AlMjB3b3Jrc3BhY2V8ZW58MHx8fHwxNzY5MzA3Mjk5fDA&ixlib=rb-4.1.0&q=85",
+        "alt": "Modern laptop workspace",
+        "usage": "Welcome banner or empty state illustration"
+      },
+      "avatars": [
+        "https://images.unsplash.com/photo-1762522927402-f390672558d8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBjb3Jwb3JhdGUlMjBoZWFkc2hvdHxlbnwwfHx8fDE3NjkzMDczMDJ8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1765005204058-10418f5123c5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBjb3Jwb3JhdGUlMjBoZWFkc2hvdHxlbnwwfHx8fDE3NjkzMDczMDJ8MA&ixlib=rb-4.1.0&q=85",
+        "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBjb3Jwb3JhdGUlMjBoZWFkc2hvdHxlbnwwfHx8fDE3NjkzMDczMDJ8MA&ixlib=rb-4.1.0&q=85"
+      ]
+    },
+    "icons": {
+      "library": "lucide-react",
+      "style": "Stroke width 1.5px, size 16px-20px for UI, 24px for navigation"
+    }
+  },
+  "universal_guidelines": {
+    "anti_ai_rules": [
+      "Do NOT use gradients for text or buttons unless explicitly for a 'Pro' feature.",
+      "Do NOT center-align dashboard content. Use left alignment for readability.",
+      "Do NOT use 'Inter' for headings. Use 'Manrope'.",
+      "Avoid 'Teal' (#1B93A4) for main UI elements.",
+      "Use 'JetBrains Mono' for any ID, Key, or Code-like data."
+    ],
+    "accessibility": {
+      "contrast": "Ensure 4.5:1 contrast ratio for text.",
+      "focus": "Visible focus rings on all interactive elements.",
+      "aria": "Use aria-labels for icon-only buttons."
+    },
+    "interaction": {
+      "hover": "All interactive elements must have a visible hover state.",
+      "active": "Buttons must have a scale-down effect (active:scale-95) on click.",
+      "loading": "Use skeleton loaders instead of spinners for initial data fetch."
+    }
+  },
+  "instructions_to_main_agent": {
+    "setup": "Install 'lucide-react' for icons. Ensure Tailwind config includes the custom colors and fonts.",
+    "components": "Use Shadcn/UI components as a base but override styles with the 'components' guidelines above. Do not use default Shadcn styles blindly.",
+    "layout": "Implement the 'Bento' grid for the dashboard overview. Use the sidebar layout for the main app shell.",
+    "theme": "Default to Light Mode. Implement a theme toggle if requested, but prioritize the Light Mode experience."
+  }
+}
