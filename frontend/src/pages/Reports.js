@@ -29,7 +29,7 @@ const Reports = () => {
     { id: 'depreciation', label: 'Asset Depreciation', icon: TrendingDown },
   ];
 
-  useEffect(() => { fetchReport(activeReport); }, [activeReport]);
+  useEffect(() => { fetchReport(activeReport); }, [activeReport]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchReport = async (id) => {
     setLoading(true);

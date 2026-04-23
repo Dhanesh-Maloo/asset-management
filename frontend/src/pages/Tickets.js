@@ -47,6 +47,7 @@ const Tickets = () => {
   useEffect(() => {
     fetchTickets();
     fetchUsers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

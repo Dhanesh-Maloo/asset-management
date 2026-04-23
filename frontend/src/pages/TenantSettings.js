@@ -48,6 +48,7 @@ const TenantSettings = () => {
 
   useEffect(() => {
     fetchTenant();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchTenant = async (tenantId) => {

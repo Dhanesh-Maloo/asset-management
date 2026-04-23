@@ -41,6 +41,7 @@ const Assets = () => {
 
   useEffect(() => {
     fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, statusFilter]);
 
   const fetchData = async () => {

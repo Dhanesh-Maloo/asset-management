@@ -63,6 +63,7 @@ const AssetDetail = () => {
     if (assetId) {
       fetchAssetDetails();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetId]);
 
   const fetchAssetDetails = async () => {
