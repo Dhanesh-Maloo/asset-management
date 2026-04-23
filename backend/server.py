@@ -3649,8 +3649,8 @@ _cors_origins = [o.strip() for o in _cors_origins_env.split(',') if o.strip()] i
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_origins=["*"],
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Session-ID"],
 )
