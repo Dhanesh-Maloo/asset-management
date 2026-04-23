@@ -11,7 +11,8 @@
       "Bash(python *)",
       "Bash(yarn add *)",
       "Bash(sed 's/@app\\\\.//')",
-      "Bash(node -e \"require\\('./src/App.js'\\)\")"
+      "Bash(node -e \"require\\('./src/App.js'\\)\")",
+      "PowerShell(claude doctor *)"
     ]
   }
 }
