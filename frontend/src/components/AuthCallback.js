@@ -64,9 +64,10 @@ const AuthCallback = () => {
         // so user stays null and ProtectedRoute redirects back to /login.
         window.location.replace('/dashboard');
       } catch (error) {
-        console.error('OAuth session exchange failed:', error);
-        toast.error('Authentication failed. Please try again.');
-        window.location.replace('/login');
+        const detail = error?.response?.data?.detail || error?.message || 'Unknown error';
+        console.error('OAuth session exchange failed:', detail, error);
+        toast.error(`Authentication failed: ${detail}`);
+        setTimeout(() => window.location.replace('/login'), 3000);
       }
     };
 

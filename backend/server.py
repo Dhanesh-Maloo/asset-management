@@ -1168,9 +1168,12 @@ async def google_oauth_callback(request: GoogleAuthRequest):
             detail="Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in environment variables."
         )
 
-    redirect_uri = GOOGLE_REDIRECT_URI or request.redirect_uri
+    # Use redirect_uri from the request (must match exactly what was used in the
+    # authorization request). Fall back to GOOGLE_REDIRECT_URI env var only if
+    # the frontend doesn't send one.
+    redirect_uri = request.redirect_uri or GOOGLE_REDIRECT_URI
     if not redirect_uri:
-        raise HTTPException(status_code=400, detail="No redirect_uri configured. Set GOOGLE_REDIRECT_URI in environment variables.")
+        raise HTTPException(status_code=400, detail="No redirect_uri provided.")
 
     async with httpx.AsyncClient() as client:
         # Step 1: Exchange authorization code for Google tokens
@@ -1185,7 +1188,9 @@ async def google_oauth_callback(request: GoogleAuthRequest):
             },
         )
         if token_resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Failed to exchange Google authorization code")
+            google_error = token_resp.json().get("error_description") or token_resp.json().get("error") or "unknown error"
+            logging.error(f"Google token exchange failed: {token_resp.status_code} {google_error}")
+            raise HTTPException(status_code=401, detail=f"Google sign-in failed: {google_error}")
 
         access_token = token_resp.json().get("access_token")
 
