@@ -35,24 +35,19 @@ const AuthCallback = () => {
         let response;
 
         if (googleCode) {
-          // Direct Google OAuth flow
+          // Direct Google OAuth flow — no withCredentials needed (JWT returned in body)
           response = await axios.post(
             `${API}/auth/google`,
             {
               code: googleCode,
               redirect_uri: window.location.origin + '/auth/callback',
-            },
-            { withCredentials: true }
+            }
           );
         } else {
-          // Emergent OAuth flow (fallback / development)
           response = await axios.post(
             `${API}/auth/session`,
             {},
-            {
-              headers: { 'X-Session-ID': sessionId },
-              withCredentials: true,
-            }
+            { headers: { 'X-Session-ID': sessionId } }
           );
         }
 
