@@ -58,6 +58,7 @@ FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 # Google OAuth (direct) configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', '')
 
 # Exchange rate cache (refreshed every hour)
 _exchange_rates_cache: dict = {"rates": None, "fetched_at": None}
@@ -1156,7 +1157,7 @@ async def create_session_from_oauth(request: Request, response: Response):
 # ── Direct Google OAuth endpoint ─────────────────────────────────────────────
 class GoogleAuthRequest(BaseModel):
     code: str
-    redirect_uri: str
+    redirect_uri: Optional[str] = None
 
 @api_router.post("/auth/google")
 async def google_oauth_callback(request: GoogleAuthRequest):
@@ -1164,8 +1165,12 @@ async def google_oauth_callback(request: GoogleAuthRequest):
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(
             status_code=501,
-            detail="Direct Google OAuth is not configured on this server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env"
+            detail="Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in environment variables."
         )
+
+    redirect_uri = GOOGLE_REDIRECT_URI or request.redirect_uri
+    if not redirect_uri:
+        raise HTTPException(status_code=400, detail="No redirect_uri configured. Set GOOGLE_REDIRECT_URI in environment variables.")
 
     async with httpx.AsyncClient() as client:
         # Step 1: Exchange authorization code for Google tokens
@@ -1175,7 +1180,7 @@ async def google_oauth_callback(request: GoogleAuthRequest):
                 "code": request.code,
                 "client_id": GOOGLE_CLIENT_ID,
                 "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": request.redirect_uri,
+                "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             },
         )

@@ -6,21 +6,20 @@ const GoogleSignInButton = ({ text = "Continue with Google", variant = "outline"
     const redirectUrl = window.location.origin + '/auth/callback';
     const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 
-    if (googleClientId) {
-      // Direct Google OAuth — requires REACT_APP_GOOGLE_CLIENT_ID in .env
-      const params = new URLSearchParams({
-        client_id: googleClientId,
-        redirect_uri: redirectUrl,
-        response_type: 'code',
-        scope: 'openid email profile',
-        access_type: 'offline',
-        prompt: 'select_account',
-      });
-      window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-    } else {
-      // Fallback: Emergent-managed OAuth (demo / development)
-      window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    if (!googleClientId) {
+      console.error('REACT_APP_GOOGLE_CLIENT_ID is not set');
+      return;
     }
+
+    const params = new URLSearchParams({
+      client_id: googleClientId,
+      redirect_uri: redirectUrl,
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'offline',
+      prompt: 'select_account',
+    });
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
   return (
