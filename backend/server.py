@@ -3173,6 +3173,63 @@ async def update_license(license_id: str, update: LicenseUpdate, current_user: U
         raise HTTPException(status_code=404, detail="License not found")
     return {"message": "License updated"}
 
+@api_router.post("/licenses/seed-demo")
+async def seed_demo_licenses(current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    tenant_id = current_user.tenant_id
+    now = datetime.now(timezone.utc)
+
+    demo_licenses = [
+        {"name": "Microsoft 365", "vendor": "Microsoft", "license_type": "subscription",
+         "seats_total": 50, "seats_used": 42, "cost": 85000,
+         "purchase_date": "2024-01-01", "expiry_date": "2025-12-31",
+         "license_key": "M365-DEMO-XXXX-XXXX", "notes": "Company-wide Office suite"},
+        {"name": "Adobe Creative Cloud", "vendor": "Adobe", "license_type": "subscription",
+         "seats_total": 20, "seats_used": 12, "cost": 48000,
+         "purchase_date": "2024-03-01", "expiry_date": "2025-09-30",
+         "license_key": "ACC-DEMO-XXXX-XXXX", "notes": "Design team licenses"},
+        {"name": "Zoom Business", "vendor": "Zoom", "license_type": "subscription",
+         "seats_total": 30, "seats_used": 28, "cost": 32000,
+         "purchase_date": "2024-01-15", "expiry_date": "2025-11-30",
+         "license_key": "ZOOM-DEMO-XXXX-XXXX", "notes": "Video conferencing"},
+        {"name": "Slack Pro", "vendor": "Slack", "license_type": "subscription",
+         "seats_total": 40, "seats_used": 35, "cost": 28000,
+         "purchase_date": "2024-02-01", "expiry_date": "2026-01-31",
+         "license_key": "SLACK-DEMO-XXXX-XXXX", "notes": "Team communication"},
+        {"name": "GitHub Enterprise", "vendor": "GitHub", "license_type": "subscription",
+         "seats_total": 15, "seats_used": 11, "cost": 55000,
+         "purchase_date": "2024-04-01", "expiry_date": "2025-03-31",
+         "license_key": "GHE-DEMO-XXXX-XXXX", "notes": "Developer team"},
+        {"name": "Antivirus Pro", "vendor": "Kaspersky", "license_type": "subscription",
+         "seats_total": 100, "seats_used": 87, "cost": 18000,
+         "purchase_date": "2024-01-01", "expiry_date": "2025-07-31",
+         "license_key": "KAV-DEMO-XXXX-XXXX", "notes": "Endpoint protection"},
+        {"name": "AutoCAD", "vendor": "Autodesk", "license_type": "perpetual",
+         "seats_total": 5, "seats_used": 3, "cost": 120000,
+         "purchase_date": "2023-06-01", "expiry_date": None,
+         "license_key": "ACAD-DEMO-XXXX-XXXX", "notes": "Engineering team"},
+    ]
+
+    inserted = 0
+    for d in demo_licenses:
+        existing = await db.licenses.find_one(
+            {"name": {"$regex": f"^{re.escape(d['name'])}$", "$options": "i"}, "tenant_id": tenant_id}
+        )
+        if not existing:
+            lic = SoftwareLicense(
+                tenant_id=tenant_id,
+                name=d["name"], vendor=d["vendor"], license_type=d["license_type"],
+                seats_total=d["seats_total"], seats_used=d["seats_used"], cost=d["cost"],
+                purchase_date=d["purchase_date"], expiry_date=d["expiry_date"],
+                license_key=d["license_key"], notes=d["notes"],
+            )
+            await db.licenses.insert_one(lic.model_dump())
+            inserted += 1
+
+    return {"message": f"{inserted} demo licenses added", "inserted": inserted}
+
 @api_router.delete("/licenses/{license_id}")
 async def delete_license(license_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:

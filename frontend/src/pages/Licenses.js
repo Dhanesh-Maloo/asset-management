@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Key, X, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Key, X, AlertTriangle, Sparkles } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -27,6 +27,7 @@ const Licenses = () => {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [deleteId, setDeleteId] = useState(null);
+  const [seedingDemo, setSeedingDemo] = useState(false);
 
   const canEdit = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
 
@@ -93,6 +94,24 @@ const Licenses = () => {
     } catch (e) { toast.error(e.response?.data?.detail || 'Delete failed'); }
   };
 
+  const loadDemoData = async () => {
+    setSeedingDemo(true);
+    try {
+      const res = await axios.post(`${API}/licenses/seed-demo`);
+      const count = res.data.inserted;
+      if (count > 0) {
+        toast.success(`${count} demo licenses loaded! Dashboard chart is ready.`);
+        fetchLicenses();
+      } else {
+        toast.info('Demo licenses already exist — nothing new was added.');
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to load demo data');
+    } finally {
+      setSeedingDemo(false);
+    }
+  };
+
   const isExpiringSoon = (expiry) => {
     if (!expiry) return false;
     const days = (new Date(expiry) - new Date()) / (1000 * 60 * 60 * 24);
@@ -126,10 +145,17 @@ const Licenses = () => {
             <p className="text-slate-500 mt-1">Track software licenses, seats, and expiry dates</p>
           </div>
           {canEdit && (
-            <button onClick={openCreate}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-              <Plus className="h-4 w-4" /> Add License
-            </button>
+            <div className="flex gap-2">
+              <button onClick={loadDemoData} disabled={seedingDemo}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 text-sm">
+                <Sparkles className="h-4 w-4" />
+                {seedingDemo ? 'Loading...' : 'Load Demo Data'}
+              </button>
+              <button onClick={openCreate}
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                <Plus className="h-4 w-4" /> Add License
+              </button>
+            </div>
           )}
         </div>
 
