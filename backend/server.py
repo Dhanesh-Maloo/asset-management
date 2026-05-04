@@ -14,6 +14,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 from typing import List, Optional
 import uuid
+import re
 from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
@@ -1551,7 +1552,19 @@ async def create_product(product_data: ProductCreate, current_user: User = Depen
         product_dict["tenant_id"] = current_user.tenant_id
     elif not product_dict.get("tenant_id"):
         product_dict["tenant_id"] = None  # Global product
-    
+
+    # Case-insensitive duplicate check within the same tenant scope
+    scope_tenant_id = product_dict.get("tenant_id")
+    duplicate_query = {
+        "name": {"$regex": f"^{re.escape(product_dict['name'])}$", "$options": "i"},
+        "is_deleted": {"$ne": True},
+    }
+    if scope_tenant_id:
+        duplicate_query["$or"] = [{"tenant_id": scope_tenant_id}, {"tenant_id": None}, {"tenant_id": {"$exists": False}}]
+    existing = await db.products.find_one(duplicate_query, {"_id": 0, "name": 1})
+    if existing:
+        raise HTTPException(status_code=409, detail=f"A product named '{existing['name']}' already exists. Please use a different name.")
+
     product = Product(**product_dict)
     await db.products.insert_one(product.model_dump())
     return product
