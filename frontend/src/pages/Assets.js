@@ -34,21 +34,25 @@ const Assets = () => {
   const [assetToDelete, setAssetToDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [demoFilter, setDemoFilter] = useState('');
   const [assetForm, setAssetForm] = useState({
     asset_tag: '', product_id: '', serial_number: '', tenant_id: '', location: '',
-    purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20
+    purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20,
+    expiry_date: '', is_demo: false
   });
 
   useEffect(() => {
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, demoFilter]);
 
   const fetchData = async () => {
     try {
       const params = {};
       if (searchTerm) params.search = searchTerm;
       if (statusFilter) params.status = statusFilter;
+      if (demoFilter === 'demo') params.is_demo = true;
+      if (demoFilter === 'regular') params.is_demo = false;
       const [assetsRes, productsRes] = await Promise.all([
         axios.get(`${API}/assets`, { params }),
         axios.get(`${API}/products`)
@@ -151,7 +155,7 @@ const Assets = () => {
       });
       toast.success('Asset added successfully');
       setAddAssetDialogOpen(false);
-      setAssetForm({ asset_tag: '', product_id: '', serial_number: '', tenant_id: '', location: '', purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20 });
+      setAssetForm({ asset_tag: '', product_id: '', serial_number: '', tenant_id: '', location: '', purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20, expiry_date: '', is_demo: false });
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to add asset');
@@ -270,6 +274,16 @@ const Assets = () => {
                     <SelectItem value="disposed">Disposed</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={demoFilter || "all"} onValueChange={v => setDemoFilter(v === "all" ? "" : v)}>
+                  <SelectTrigger className="w-36 h-9">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    <SelectItem value="demo">Demo Assets</SelectItem>
+                    <SelectItem value="regular">Regular Assets</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardHeader>
@@ -303,6 +317,7 @@ const Assets = () => {
                       <TableHead>Status</TableHead>
                       {canManage && <TableHead>Assigned To</TableHead>}
                       <TableHead>Location</TableHead>
+                      <TableHead>Expiry Date</TableHead>
                       {canManage && <TableHead>Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -318,7 +333,12 @@ const Assets = () => {
                           </TableCell>
                         )}
                         <TableCell className="font-mono font-semibold text-primary">
-                          {asset.asset_tag}
+                          <div className="flex items-center gap-1.5">
+                            {asset.asset_tag}
+                            {asset.is_demo && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300">DEMO</span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="font-medium">
                           {products[asset.product_id]?.name || 'Unknown Product'}
@@ -335,6 +355,9 @@ const Assets = () => {
                           </TableCell>
                         )}
                         <TableCell>{asset.location || '-'}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {asset.expiry_date ? new Date(asset.expiry_date).toLocaleDateString() : '-'}
+                        </TableCell>
                         {canManage && (
                           <TableCell>
                             <div className="flex gap-2">
@@ -498,9 +521,13 @@ const Assets = () => {
                 <Input id="asset-purchase-date" type="date" value={assetForm.purchase_date} onChange={(e) => setAssetForm({ ...assetForm, purchase_date: e.target.value })} />
               </div>
               <div>
-                <Label htmlFor="asset-dep-rate">Depreciation Rate (%/year)</Label>
-                <Input id="asset-dep-rate" type="number" min="0" max="100" value={assetForm.depreciation_rate} onChange={(e) => setAssetForm({ ...assetForm, depreciation_rate: parseFloat(e.target.value) || 20 })} />
+                <Label htmlFor="asset-expiry-date">Expiry Date</Label>
+                <Input id="asset-expiry-date" type="date" value={assetForm.expiry_date} onChange={(e) => setAssetForm({ ...assetForm, expiry_date: e.target.value })} />
               </div>
+            </div>
+            <div>
+              <Label htmlFor="asset-dep-rate">Depreciation Rate (%/year)</Label>
+              <Input id="asset-dep-rate" type="number" min="0" max="100" value={assetForm.depreciation_rate} onChange={(e) => setAssetForm({ ...assetForm, depreciation_rate: parseFloat(e.target.value) || 20 })} />
             </div>
             <div>
               <Label>Depreciation Method</Label>
@@ -514,6 +541,21 @@ const Assets = () => {
                   <SelectItem value="none">No Depreciation</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Asset Category</Label>
+              <Select value={assetForm.is_demo ? 'demo' : 'regular'} onValueChange={(val) => setAssetForm({ ...assetForm, is_demo: val === 'demo' })}>
+                <SelectTrigger data-testid="asset-category-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="regular">Regular Asset</SelectItem>
+                  <SelectItem value="demo">Demo Asset</SelectItem>
+                </SelectContent>
+              </Select>
+              {assetForm.is_demo && (
+                <p className="text-xs text-amber-600 mt-1">This asset will be marked as a demo and visible in the Demo Assets filter.</p>
+              )}
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAddAssetDialogOpen(false)}>Cancel</Button>

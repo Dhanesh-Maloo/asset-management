@@ -356,6 +356,8 @@ class Asset(BaseModel):
     actual_return_date: Optional[str] = None
 
     department_id: Optional[str] = None
+    expiry_date: Optional[str] = None
+    is_demo: bool = False
 
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -373,6 +375,8 @@ class AssetCreate(BaseModel):
     depreciation_method: DepreciationMethod = DepreciationMethod.STRAIGHT_LINE
     depreciation_rate: float = 20.0
     salvage_value: float = 0.0
+    expiry_date: Optional[str] = None
+    is_demo: bool = False
 
 class AssetAssign(BaseModel):
     assigned_to: str
@@ -1509,6 +1513,25 @@ async def update_tenant(tenant_id: str, tenant_update: TenantUpdate, current_use
     updated_tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
     return Tenant(**updated_tenant)
 
+@api_router.delete("/tenants/{tenant_id}")
+async def delete_tenant(tenant_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can delete tenants")
+
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Cascade delete all data belonging to this tenant
+    for col in ["users", "assets", "tickets", "orders", "products", "departments",
+                "groups", "locations", "vendors", "licenses", "reservations",
+                "maintenance_tasks", "api_keys", "audit_logs", "custom_fields",
+                "asset_transfers", "ticket_comments"]:
+        await db[col].delete_many({"tenant_id": tenant_id})
+
+    await db.tenants.delete_one({"id": tenant_id})
+    return {"message": f"Tenant '{tenant['name']}' and all related data deleted"}
+
 @api_router.get("/tenants/subdomain/{subdomain}", response_model=Tenant)
 async def get_tenant_by_subdomain(subdomain: str):
     tenant = await db.tenants.find_one({"subdomain": subdomain}, {"_id": 0})
@@ -1787,6 +1810,7 @@ async def get_assets(
     current_user: User = Depends(get_current_user),
     status: Optional[str] = Query(None, description="Filter by status"),
     search: Optional[str] = Query(None, description="Search by name or serial number"),
+    is_demo: Optional[bool] = Query(None, description="Filter demo assets"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Results per page")
 ):
@@ -1802,6 +1826,8 @@ async def get_assets(
 
     if status:
         query["status"] = status
+    if is_demo is not None:
+        query["is_demo"] = is_demo
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -1972,6 +1998,27 @@ async def get_users(current_user: User = Depends(get_current_user)):
     
     users = await db.users.find(query, {"_id": 0, "password_hash": 0}).to_list(1000)
     return [User(**u) for u in users]
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if current_user.role == UserRole.TENANT_ADMIN:
+        if target_user["tenant_id"] != current_user.tenant_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if target_user["role"] in ["tenant_admin", "super_admin"]:
+            raise HTTPException(status_code=403, detail="Cannot delete admin accounts")
+
+    await db.users.delete_one({"id": user_id})
+    return {"message": "User deleted successfully"}
 
 # Group endpoints
 @api_router.post("/groups", response_model=Group)
@@ -3436,11 +3483,26 @@ async def get_dashboard_charts(current_user: User = Depends(get_current_user_hyb
         if count > 0:
             ticket_status_data.append({"name": s.replace("_", " ").title(), "value": count})
 
+    # License seat utilization
+    licenses_raw = await db.licenses.find(tenant_q, {"_id": 0}).to_list(100)
+    license_utilization = []
+    for lic in licenses_raw:
+        total = lic.get("seats_total", 0)
+        used = lic.get("seats_used", 0)
+        available = max(0, total - used)
+        license_utilization.append({
+            "name": lic.get("name", "Unknown"),
+            "used": used,
+            "available": available,
+            "total": total,
+        })
+
     return {
         "asset_status": asset_status_data,
         "monthly_orders": monthly_orders,
         "ticket_trends": ticket_trends,
         "ticket_status": ticket_status_data,
+        "license_utilization": license_utilization,
     }
 
 # ═══════════════════════════════════════════════════════════════════════════

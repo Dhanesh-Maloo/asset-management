@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Users as UsersIcon, Plus } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -23,6 +23,8 @@ const Users = () => {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
   
   const [formData, setFormData] = useState({
     email: '',
@@ -69,6 +71,30 @@ const Users = () => {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create user');
     }
+  };
+
+  const openDeleteUser = (u) => {
+    setUserToDelete(u);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteUser = async () => {
+    try {
+      await axios.delete(`${API}/users/${userToDelete.id}`);
+      toast.success(`User "${userToDelete.name}" deleted`);
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete user');
+    }
+  };
+
+  const canDeleteUser = (u) => {
+    if (user.id === u.id) return false;
+    if (user.role === 'super_admin') return true;
+    if (user.role === 'tenant_admin' && u.role !== 'tenant_admin' && u.role !== 'super_admin') return true;
+    return false;
   };
 
   const getRoleBadge = (role) => {
@@ -127,6 +153,7 @@ const Users = () => {
                       {user.role === 'super_admin' && <TableHead>Tenant</TableHead>}
                       <TableHead>Status</TableHead>
                       <TableHead>Created</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -147,6 +174,14 @@ const Users = () => {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(u.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          {canDeleteUser(u) && (
+                            <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200" onClick={() => openDeleteUser(u)} data-testid={`delete-user-btn-${u.id}`}>
+                              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                              Delete
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -247,6 +282,24 @@ const Users = () => {
               <Button type="submit" data-testid="submit-user-btn">Create User</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      {/* Delete User Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent data-testid="delete-user-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Delete User</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-semibold">{userToDelete?.name}</span> ({userToDelete?.email})? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteUser} data-testid="confirm-delete-user-btn">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete User
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </DashboardLayout>

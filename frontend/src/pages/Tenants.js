@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Separator } from '../components/ui/separator';
-import { Building2, Plus, Crown, User, Globe } from 'lucide-react';
+import { Building2, Plus, Crown, User, Globe, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -28,6 +28,8 @@ const Tenants = () => {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tierDialogOpen, setTierDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [tenantToDelete, setTenantToDelete] = useState(null);
   const [selectedTenant, setSelectedTenant] = useState(null);
   const [selectedTierId, setSelectedTierId] = useState('');
 
@@ -121,6 +123,23 @@ const Tenants = () => {
     return tier?.slug || 'free';
   };
 
+  const openDeleteDialog = (tenant) => {
+    setTenantToDelete(tenant);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteTenant = async () => {
+    try {
+      await axios.delete(`${API}/tenants/${tenantToDelete.id}`);
+      toast.success(`Tenant "${tenantToDelete.name}" deleted`);
+      setDeleteDialogOpen(false);
+      setTenantToDelete(null);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete tenant');
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="tenants-page">
@@ -190,10 +209,16 @@ const Tenants = () => {
                             {new Date(tenant.created_at).toLocaleDateString()}
                           </TableCell>
                           <TableCell>
-                            <Button size="sm" variant="outline" onClick={() => openTierDialog(tenant)} data-testid={`change-tier-btn-${tenant.id}`}>
-                              <Crown className="h-3.5 w-3.5 mr-1.5" />
-                              Change Tier
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openTierDialog(tenant)} data-testid={`change-tier-btn-${tenant.id}`}>
+                                <Crown className="h-3.5 w-3.5 mr-1.5" />
+                                Change Tier
+                              </Button>
+                              <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200" onClick={() => openDeleteDialog(tenant)} data-testid={`delete-tenant-btn-${tenant.id}`}>
+                                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                                Delete
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -359,6 +384,25 @@ const Tenants = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setTierDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleTierChange} data-testid="confirm-tier-change-btn">Update Subscription</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Delete Tenant Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent data-testid="delete-tenant-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Delete Tenant</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-semibold">{tenantToDelete?.name}</span>?
+              This will permanently delete the tenant and <span className="font-semibold text-red-600">all associated users, assets, tickets, and data</span>. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteTenant} data-testid="confirm-delete-tenant-btn">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Tenant
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

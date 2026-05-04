@@ -6,7 +6,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  LineChart, Line, ResponsiveContainer, Legend
+  LineChart, Line, ResponsiveContainer, Legend, LabelList
 } from 'recharts';
 import {
   Laptop,
@@ -15,7 +15,8 @@ import {
   Ticket,
   Users,
   Building2,
-  CheckCircle
+  CheckCircle,
+  Key
 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -199,6 +200,60 @@ const Dashboard = () => {
                         <Tooltip />
                         <Line type="monotone" dataKey="tickets" stroke="#F59E0B" strokeWidth={2} dot={{ r: 4 }} name="Tickets" />
                       </LineChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* License Seat Utilization */}
+              {charts.license_utilization?.length > 0 && (
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Key className="h-4 w-4 text-indigo-500" />
+                        Software License Utilization
+                      </CardTitle>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-indigo-500"></span> Used Seats</span>
+                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-sm bg-slate-200"></span> Available Seats</span>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={Math.max(220, charts.license_utilization.length * 52)}>
+                      <BarChart
+                        data={charts.license_utilization}
+                        layout="vertical"
+                        margin={{ left: 16, right: 48, top: 4, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={130} />
+                        <Tooltip
+                          formatter={(value, name) => [value, name === 'used' ? 'Used Seats' : 'Available Seats']}
+                          content={({ active, payload, label }) => {
+                            if (!active || !payload?.length) return null;
+                            const total = (payload[0]?.value || 0) + (payload[1]?.value || 0);
+                            const used = payload[0]?.value || 0;
+                            const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+                            return (
+                              <div className="bg-white border border-slate-200 rounded-lg p-3 shadow text-sm">
+                                <p className="font-semibold mb-1">{label}</p>
+                                <p className="text-indigo-600">Used: {used} seats</p>
+                                <p className="text-slate-500">Available: {payload[1]?.value || 0} seats</p>
+                                <p className="text-slate-700 font-medium mt-1">Total: {total} seats ({pct}% used)</p>
+                              </div>
+                            );
+                          }}
+                        />
+                        <Bar dataKey="used" stackId="seats" fill="#4F46E5" name="Used" radius={[0, 0, 0, 0]}>
+                          <LabelList dataKey="used" position="insideRight" style={{ fill: '#fff', fontSize: 11, fontWeight: 600 }} formatter={(v) => v > 0 ? v : ''} />
+                        </Bar>
+                        <Bar dataKey="available" stackId="seats" fill="#E2E8F0" name="Available" radius={[0, 4, 4, 0]}>
+                          <LabelList dataKey="total" position="right" style={{ fill: '#64748b', fontSize: 11 }} formatter={(v) => `${v} total`} />
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
                   </CardContent>
                 </Card>
