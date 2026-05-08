@@ -360,6 +360,19 @@ class Asset(BaseModel):
     expiry_date: Optional[str] = None
     is_demo: bool = False
 
+    # Lease tracking
+    is_leased: bool = False
+    lessor_name: str = ""
+    lease_start_date: Optional[str] = None
+    lease_end_date: Optional[str] = None
+    monthly_lease_payment: float = 0.0
+
+    # Disposal tracking
+    disposal_date: Optional[str] = None
+    disposal_method: str = ""
+    disposal_notes: str = ""
+    sale_proceeds: float = 0.0
+
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class AssetCreate(BaseModel):
@@ -378,6 +391,11 @@ class AssetCreate(BaseModel):
     salvage_value: float = 0.0
     expiry_date: Optional[str] = None
     is_demo: bool = False
+    is_leased: bool = False
+    lessor_name: str = ""
+    lease_start_date: Optional[str] = None
+    lease_end_date: Optional[str] = None
+    monthly_lease_payment: float = 0.0
 
 class AssetAssign(BaseModel):
     assigned_to: str
@@ -663,12 +681,92 @@ class BulkAssetUpdate(BaseModel):
     location: Optional[str] = None
     department_id: Optional[str] = None
 
+class AssetDispose(BaseModel):
+    disposal_method: str = Field(..., description="sold, scrapped, donated, or other")
+    disposal_date: str
+    disposal_notes: str = Field("", max_length=1000)
+    sale_proceeds: float = 0.0
+
+class AssetDocument(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    asset_id: str
+    tenant_id: str
+    document_type: str = "other"  # invoice, warranty, amc, insurance, other
+    filename: str
+    file_data: str  # base64 data URL
+    file_content_type: str = "application/pdf"
+    file_size: int = 0
+    uploaded_by: str = ""
+    notes: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class AMCContract(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    asset_id: str
+    tenant_id: str
+    vendor_name: str
+    contract_number: str = ""
+    start_date: str
+    end_date: str
+    annual_cost: float = 0.0
+    renewal_reminder_days: int = 30
+    notes: str = ""
+    status: str = "active"
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class AMCContractCreate(BaseModel):
+    vendor_name: str = Field(..., min_length=1, max_length=200)
+    contract_number: str = Field("", max_length=100)
+    start_date: str
+    end_date: str
+    annual_cost: float = 0.0
+    renewal_reminder_days: int = 30
+    notes: str = Field("", max_length=1000)
+
+class AMCContractUpdate(BaseModel):
+    vendor_name: Optional[str] = None
+    contract_number: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    annual_cost: Optional[float] = None
+    renewal_reminder_days: Optional[int] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
 class ProfileUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+class Invoice(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    tenant_id: str
+    amount: float
+    currency: str = "USD"
+    status: str = "pending"  # pending, paid, overdue
+    period_start: str
+    period_end: str
+    description: str
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    paid_at: Optional[str] = None
+
+class InvoiceCreate(BaseModel):
+    amount: float = Field(..., gt=0)
+    currency: str = "USD"
+    status: str = "pending"
+    period_start: str
+    period_end: str
+    description: str = Field(..., min_length=1, max_length=300)
+
+class InvoiceUpdate(BaseModel):
+    status: Optional[str] = None
+    paid_at: Optional[str] = None
+    amount: Optional[float] = None
 
 # Helper functions
 def hash_password(password: str) -> str:
@@ -1378,6 +1476,12 @@ async def public_signup(
     admin_doc["password_hash"] = hashed_password
     await db.users.insert_one(admin_doc)
     
+    # Seed demo data for new tenant so they can explore with sample data
+    try:
+        await seed_tenant_demo_data(tenant.id, admin_user.id)
+    except Exception as e:
+        logger.warning(f"Demo data seeding failed for tenant {tenant.id}: {e}")
+
     return {
         "message": "Signup successful! You can now login.",
         "tenant_id": tenant.id,
@@ -2632,6 +2736,36 @@ async def get_tenant_usage(tenant_id: str, current_user: User = Depends(get_curr
     
     return usage
 
+# ── Billing / Invoices ────────────────────────────────────────────────────────
+
+@api_router.get("/invoices")
+async def list_invoices(current_user: User = Depends(get_current_user)):
+    if current_user.role == UserRole.EMPLOYEE:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    invoices = await db.invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return invoices
+
+@api_router.post("/invoices")
+async def create_invoice(invoice_data: InvoiceCreate, tenant_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can create invoices")
+    invoice = Invoice(tenant_id=tenant_id, **invoice_data.model_dump())
+    await db.invoices.insert_one(invoice.model_dump())
+    return invoice
+
+@api_router.patch("/invoices/{invoice_id}")
+async def update_invoice(invoice_id: str, update: InvoiceUpdate, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super admins can update invoices")
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    if update_data:
+        await db.invoices.update_one({"id": invoice_id}, {"$set": update_data})
+    return await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+
 # ── DELETE endpoints ──────────────────────────────────────────────────────────
 
 @api_router.delete("/products/{product_id}")
@@ -3783,6 +3917,525 @@ async def check_tier_limit(tenant_id: str, resource: str):
         if count >= limit:
             raise HTTPException(status_code=403, detail=f"Monthly ticket limit reached ({limit}). Upgrade your subscription plan.")
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE 13: DUPLICATE SERIAL NUMBER CHECK
+# ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.get("/assets/check-serial")
+async def check_serial_number(
+    serial_number: str = Query(...),
+    tenant_id: str = Query(...),
+    current_user: User = Depends(get_current_user_hybrid)
+):
+    query = {"serial_number": {"$regex": f"^{re.escape(serial_number)}$", "$options": "i"}, "is_deleted": {"$ne": True}}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = tenant_id
+    existing = await db.assets.find_one(query, {"_id": 0, "asset_tag": 1, "id": 1})
+    if existing:
+        return {"exists": True, "asset_tag": existing.get("asset_tag", ""), "asset_id": existing.get("id", "")}
+    return {"exists": False}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE 3: ASSET DISPOSAL / WRITE-OFF
+# ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.post("/assets/{asset_id}/dispose")
+async def dispose_asset(asset_id: str, data: AssetDispose, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if asset.get("status") == "disposed":
+        raise HTTPException(status_code=400, detail="Asset is already disposed")
+    update = {
+        "status": "disposed",
+        "disposal_date": data.disposal_date,
+        "disposal_method": data.disposal_method,
+        "disposal_notes": data.disposal_notes,
+        "sale_proceeds": data.sale_proceeds,
+    }
+    await db.assets.update_one({"id": asset_id}, {"$set": update})
+    history = AssetHistory(
+        asset_id=asset_id, action="disposed",
+        performed_by=current_user.id,
+        notes=f"Disposed via {data.disposal_method}. Sale proceeds: {data.sale_proceeds}"
+    )
+    await db.asset_history.insert_one(history.model_dump())
+    updated = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    return Asset(**updated)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE 2: ASSET DOCUMENT ATTACHMENTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+ALLOWED_DOC_TYPES = {"application/pdf", "application/msword",
+                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                     "image/jpeg", "image/png", "application/vnd.ms-excel",
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+@api_router.post("/assets/{asset_id}/documents")
+async def upload_asset_document(
+    asset_id: str,
+    document_type: str = "other",
+    notes: str = "",
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user_hybrid)
+):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if file.content_type not in ALLOWED_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: PDF, Word, Excel, JPEG, PNG")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File must be under 10MB")
+    import base64
+    b64 = base64.b64encode(content).decode()
+    doc = AssetDocument(
+        asset_id=asset_id,
+        tenant_id=asset["tenant_id"],
+        document_type=document_type,
+        filename=file.filename or "document",
+        file_data=f"data:{file.content_type};base64,{b64}",
+        file_content_type=file.content_type,
+        file_size=len(content),
+        uploaded_by=current_user.id,
+        notes=notes
+    )
+    await db.asset_documents.insert_one(doc.model_dump())
+    return {"message": "Document uploaded", "id": doc.id, "filename": doc.filename, "document_type": doc.document_type}
+
+
+@api_router.get("/assets/{asset_id}/documents")
+async def get_asset_documents(asset_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    docs = await db.asset_documents.find({"asset_id": asset_id}, {"_id": 0, "file_data": 0}).to_list(100)
+    return docs
+
+
+@api_router.get("/assets/{asset_id}/documents/{doc_id}/download")
+async def download_asset_document(asset_id: str, doc_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    doc = await db.asset_documents.find_one({"id": doc_id, "asset_id": asset_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    import base64
+    data_url = doc["file_data"]
+    _, b64_data = data_url.split(",", 1)
+    file_bytes = base64.b64decode(b64_data)
+    from fastapi.responses import Response as FastAPIResponse
+    return FastAPIResponse(
+        content=file_bytes,
+        media_type=doc["file_content_type"],
+        headers={"Content-Disposition": f'attachment; filename="{doc["filename"]}"'}
+    )
+
+
+@api_router.delete("/assets/{asset_id}/documents/{doc_id}")
+async def delete_asset_document(asset_id: str, doc_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    result = await db.asset_documents.delete_one({"id": doc_id, "asset_id": asset_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"message": "Document deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE 8: AMC CONTRACT TRACKING
+# ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.post("/assets/{asset_id}/amc")
+async def create_amc_contract(asset_id: str, data: AMCContractCreate, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    contract = AMCContract(asset_id=asset_id, tenant_id=asset["tenant_id"], **data.model_dump())
+    await db.amc_contracts.insert_one(contract.model_dump())
+    return contract
+
+
+@api_router.get("/assets/{asset_id}/amc")
+async def get_amc_contracts(asset_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    contracts = await db.amc_contracts.find({"asset_id": asset_id}, {"_id": 0}).to_list(50)
+    return contracts
+
+
+@api_router.patch("/amc/{contract_id}")
+async def update_amc_contract(contract_id: str, data: AMCContractUpdate, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    update_data = data.model_dump(exclude_unset=True)
+    result = await db.amc_contracts.update_one({"id": contract_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="AMC contract not found")
+    return await db.amc_contracts.find_one({"id": contract_id}, {"_id": 0})
+
+
+@api_router.delete("/amc/{contract_id}")
+async def delete_amc_contract(contract_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    result = await db.amc_contracts.delete_one({"id": contract_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="AMC contract not found")
+    return {"message": "AMC contract deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FEATURE 6: EXCEL (.xlsx) EXPORT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.get("/assets/export/xlsx")
+async def export_assets_xlsx(current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query: dict = {"is_deleted": {"$ne": True}}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+    assets = await db.assets.find(query, {"_id": 0}).to_list(5000)
+    products_raw = await db.products.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    products_map = {p["id"]: p["name"] for p in products_raw}
+
+    import openpyxl
+    import io
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Assets"
+
+    headers = [
+        "Asset Tag", "Product", "Serial Number", "Status", "Location",
+        "Assigned To", "Purchase Date", "Purchase Price", "Current Value",
+        "Depreciation Method", "Depreciation Rate (%)", "Warranty End Date",
+        "Is Leased", "Lessor Name", "Lease End Date", "Monthly Payment",
+        "Disposal Date", "Disposal Method", "Sale Proceeds",
+        "Is Demo", "Created At"
+    ]
+    ws.append(headers)
+    header_fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    for a in assets:
+        ws.append([
+            a.get("asset_tag", ""),
+            products_map.get(a.get("product_id", ""), "Unknown"),
+            a.get("serial_number", ""),
+            a.get("status", ""),
+            a.get("location", ""),
+            a.get("assigned_to", ""),
+            a.get("purchase_date", "")[:10] if a.get("purchase_date") else "",
+            a.get("purchase_price", 0),
+            a.get("current_value", 0),
+            a.get("depreciation_method", ""),
+            a.get("depreciation_rate", 0),
+            a.get("warranty_end_date", "")[:10] if a.get("warranty_end_date") else "",
+            "Yes" if a.get("is_leased") else "No",
+            a.get("lessor_name", ""),
+            a.get("lease_end_date", "")[:10] if a.get("lease_end_date") else "",
+            a.get("monthly_lease_payment", 0),
+            a.get("disposal_date", "")[:10] if a.get("disposal_date") else "",
+            a.get("disposal_method", ""),
+            a.get("sale_proceeds", 0),
+            "Yes" if a.get("is_demo") else "No",
+            a.get("created_at", "")[:10] if a.get("created_at") else "",
+        ])
+
+    for col in ws.columns:
+        max_len = max((len(str(cell.value or "")) for cell in col), default=10)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 40)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"assets_export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEMO DATA SEEDING
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def seed_tenant_demo_data(tenant_id: str, admin_user_id: str) -> int:
+    """Seed comprehensive demo data for a new tenant. Tracks all seeded IDs in demo_data_registry."""
+    now = datetime.now(timezone.utc)
+    registry_entries = []
+
+    def reg(collection: str, item_id: str):
+        registry_entries.append({
+            "tenant_id": tenant_id, "collection": collection,
+            "item_id": item_id, "created_at": now.isoformat()
+        })
+
+    # Department
+    dept_id = str(uuid.uuid4())
+    await db.departments.insert_one({
+        "id": dept_id, "name": "IT Department", "description": "Sample IT department for demo",
+        "tenant_id": tenant_id, "budget": 500000.0, "created_at": now.isoformat()
+    })
+    reg("departments", dept_id)
+
+    # Location
+    loc_id = str(uuid.uuid4())
+    await db.locations.insert_one({
+        "id": loc_id, "name": "Head Office", "building": "Tower A",
+        "floor": "3rd Floor", "room": "IT Lab", "tenant_id": tenant_id,
+        "created_at": now.isoformat()
+    })
+    reg("locations", loc_id)
+
+    # Vendors
+    v1_id, v2_id = str(uuid.uuid4()), str(uuid.uuid4())
+    await db.vendors.insert_many([
+        {"id": v1_id, "name": "TechSource India", "contact_name": "Raj Kumar",
+         "email": "raj@techsource.in", "phone": "+91-98765-43210",
+         "category": "Hardware", "tenant_id": tenant_id,
+         "notes": "Primary hardware supplier", "website": "https://techsource.in",
+         "created_at": now.isoformat()},
+        {"id": v2_id, "name": "SoftSolutions Ltd", "contact_name": "Priya Sharma",
+         "email": "priya@softsolutions.com", "phone": "+91-98123-45678",
+         "category": "Software", "tenant_id": tenant_id,
+         "notes": "Software licensing partner", "website": "https://softsolutions.com",
+         "created_at": now.isoformat()},
+    ])
+    reg("vendors", v1_id)
+    reg("vendors", v2_id)
+
+    # Products
+    p_laptop_id = str(uuid.uuid4())
+    p_monitor_id = str(uuid.uuid4())
+    p_mouse_id = str(uuid.uuid4())
+    await db.products.insert_many([
+        {"id": p_laptop_id, "name": "Dell Latitude 5540", "category": "Laptop",
+         "description": "Business laptop - 13th Gen Intel Core i5, 16GB RAM, 512GB SSD",
+         "specs": {"processor": "Intel Core i5-1335U", "ram": "16GB", "storage": "512GB SSD", "display": "15.6 FHD"},
+         "image_url": "", "stock": 5, "price": 85000.0, "tenant_id": tenant_id, "created_at": now.isoformat()},
+        {"id": p_monitor_id, "name": "Samsung 24 Monitor", "category": "Monitor",
+         "description": "24-inch Full HD IPS monitor with HDMI and VGA ports",
+         "specs": {"size": "24 inch", "resolution": "1920x1080", "panel": "IPS"},
+         "image_url": "", "stock": 8, "price": 18000.0, "tenant_id": tenant_id, "created_at": now.isoformat()},
+        {"id": p_mouse_id, "name": "Logitech MX Master 3", "category": "Peripheral",
+         "description": "Advanced wireless mouse with ergonomic design",
+         "specs": {"connectivity": "Bluetooth + USB", "battery": "Rechargeable"},
+         "image_url": "", "stock": 15, "price": 4500.0, "tenant_id": tenant_id, "created_at": now.isoformat()},
+    ])
+    reg("products", p_laptop_id)
+    reg("products", p_monitor_id)
+    reg("products", p_mouse_id)
+
+    # Date helpers
+    d180 = (now - timedelta(days=180)).isoformat()
+    d365 = (now - timedelta(days=365)).isoformat()
+    d730 = (now - timedelta(days=730)).isoformat()
+    d90  = (now - timedelta(days=90)).isoformat()
+    d30  = (now - timedelta(days=30)).isoformat()
+    w365 = (now + timedelta(days=365)).isoformat()
+    w540 = (now + timedelta(days=540)).isoformat()
+    w1065 = (now + timedelta(days=1065)).isoformat()
+    w275 = (now + timedelta(days=275)).isoformat()
+    w180 = (now + timedelta(days=180)).isoformat()
+    expired_w = (now - timedelta(days=365)).isoformat()
+
+    def _base():
+        return {
+            "checked_out_to": None, "checkout_date": None,
+            "expected_return_date": None, "actual_return_date": None,
+            "is_leased": False, "lessor_name": "",
+            "lease_start_date": None, "lease_end_date": None, "monthly_lease_payment": 0.0,
+            "disposal_date": None, "disposal_method": "", "disposal_notes": "", "sale_proceeds": 0.0,
+            "is_deleted": False, "department_id": dept_id,
+        }
+
+    assets = [
+        {**_base(), "id": str(uuid.uuid4()), "asset_tag": "ASSET-001",
+         "product_id": p_laptop_id, "serial_number": "DELL-SN-001234",
+         "tenant_id": tenant_id, "status": "assigned",
+         "assigned_to": admin_user_id, "assigned_date": d180,
+         "location": "Head Office", "purchase_date": d365,
+         "warranty_start_date": d365, "warranty_end_date": w365,
+         "warranty_provider": "Dell India", "purchase_price": 85000.0,
+         "depreciation_method": "straight_line", "depreciation_rate": 20.0,
+         "salvage_value": 5000.0, "current_value": 72000.0,
+         "is_demo": True, "expiry_date": None, "created_at": d365},
+        {**_base(), "id": str(uuid.uuid4()), "asset_tag": "ASSET-002",
+         "product_id": p_monitor_id, "serial_number": "SAM-MON-88421",
+         "tenant_id": tenant_id, "status": "available",
+         "assigned_to": None, "assigned_date": None,
+         "location": "IT Lab", "purchase_date": d180,
+         "warranty_start_date": d180, "warranty_end_date": w540,
+         "warranty_provider": "Samsung India", "purchase_price": 18000.0,
+         "depreciation_method": "straight_line", "depreciation_rate": 20.0,
+         "salvage_value": 1000.0, "current_value": 15500.0,
+         "is_demo": True, "expiry_date": None, "created_at": d180},
+        {**_base(), "id": str(uuid.uuid4()), "asset_tag": "ASSET-003",
+         "product_id": p_laptop_id, "serial_number": "DELL-SN-005678",
+         "tenant_id": tenant_id, "status": "under_maintenance",
+         "assigned_to": None, "assigned_date": None,
+         "location": "Service Center", "purchase_date": d730,
+         "warranty_start_date": d730, "warranty_end_date": expired_w,
+         "warranty_provider": "Dell India", "purchase_price": 78000.0,
+         "depreciation_method": "straight_line", "depreciation_rate": 20.0,
+         "salvage_value": 5000.0, "current_value": 46800.0,
+         "is_demo": True, "expiry_date": None, "created_at": d730},
+        {**_base(), "id": str(uuid.uuid4()), "asset_tag": "ASSET-004",
+         "product_id": p_mouse_id, "serial_number": "LOG-MX3-99012",
+         "tenant_id": tenant_id, "status": "available",
+         "assigned_to": None, "assigned_date": None,
+         "location": "Storage Room", "purchase_date": d90,
+         "warranty_start_date": d90, "warranty_end_date": w275,
+         "warranty_provider": "Logitech", "purchase_price": 4500.0,
+         "depreciation_method": "straight_line", "depreciation_rate": 25.0,
+         "salvage_value": 200.0, "current_value": 4192.0,
+         "is_demo": True, "expiry_date": None, "created_at": d90},
+        {**_base(), "id": str(uuid.uuid4()), "asset_tag": "ASSET-005",
+         "product_id": p_laptop_id, "serial_number": "DELL-SN-007890",
+         "tenant_id": tenant_id, "status": "available",
+         "assigned_to": None, "assigned_date": None,
+         "location": "Head Office", "purchase_date": d30,
+         "warranty_start_date": d30, "warranty_end_date": w1065,
+         "warranty_provider": "Dell India", "purchase_price": 92000.0,
+         "depreciation_method": "straight_line", "depreciation_rate": 20.0,
+         "salvage_value": 5000.0, "current_value": 91500.0,
+         "is_demo": True, "expiry_date": None, "created_at": d30},
+    ]
+    await db.assets.insert_many(assets)
+    for a in assets:
+        reg("assets", a["id"])
+
+    # Tickets
+    t_count = await db.tickets.count_documents({"tenant_id": tenant_id})
+    tickets = [
+        {"id": str(uuid.uuid4()),
+         "ticket_number": f"TKT-{str(t_count + 1001).zfill(4)}",
+         "tenant_id": tenant_id, "created_by": admin_user_id, "assigned_to": None,
+         "title": "Laptop screen flickering on ASSET-001",
+         "description": "The screen on the assigned Dell Latitude is flickering intermittently during video calls.",
+         "priority": "high", "status": "open", "category": "hardware",
+         "created_at": (now - timedelta(days=2)).isoformat(),
+         "updated_at": (now - timedelta(days=2)).isoformat()},
+        {"id": str(uuid.uuid4()),
+         "ticket_number": f"TKT-{str(t_count + 1002).zfill(4)}",
+         "tenant_id": tenant_id, "created_by": admin_user_id, "assigned_to": None,
+         "title": "VPN not connecting from home office",
+         "description": "Unable to connect to company VPN from home. Error: Authentication failed.",
+         "priority": "medium", "status": "in_progress", "category": "network",
+         "created_at": (now - timedelta(days=5)).isoformat(),
+         "updated_at": (now - timedelta(days=1)).isoformat()},
+        {"id": str(uuid.uuid4()),
+         "ticket_number": f"TKT-{str(t_count + 1003).zfill(4)}",
+         "tenant_id": tenant_id, "created_by": admin_user_id, "assigned_to": None,
+         "title": "Printer offline on 2nd floor",
+         "description": "HP LaserJet printer showing offline. Multiple users unable to print.",
+         "priority": "low", "status": "resolved", "category": "hardware",
+         "created_at": (now - timedelta(days=10)).isoformat(),
+         "updated_at": (now - timedelta(days=7)).isoformat()},
+    ]
+    await db.tickets.insert_many(tickets)
+    for t in tickets:
+        reg("tickets", t["id"])
+
+    # Licenses
+    lic1_id = str(uuid.uuid4())
+    lic2_id = str(uuid.uuid4())
+    await db.licenses.insert_many([
+        {"id": lic1_id, "name": "Microsoft 365 Business", "vendor": "Microsoft",
+         "license_key": "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+         "seats_total": 25, "seats_used": 18,
+         "purchase_date": d365, "expiry_date": w365,
+         "cost": 85000.0, "license_type": "subscription",
+         "tenant_id": tenant_id, "notes": "Annual subscription for office productivity",
+         "created_at": d365},
+        {"id": lic2_id, "name": "Adobe Creative Cloud", "vendor": "Adobe",
+         "license_key": "ADOBE-CC-DEMO-2024",
+         "seats_total": 5, "seats_used": 3,
+         "purchase_date": d180, "expiry_date": w180,
+         "cost": 32000.0, "license_type": "subscription",
+         "tenant_id": tenant_id, "notes": "Creative Cloud for design team",
+         "created_at": d180},
+    ])
+    reg("licenses", lic1_id)
+    reg("licenses", lic2_id)
+
+    # Order
+    ord_id = str(uuid.uuid4())
+    await db.orders.insert_one({
+        "id": ord_id, "tenant_id": tenant_id, "user_id": admin_user_id,
+        "product_id": p_laptop_id, "quantity": 2,
+        "delivery_notes": "Deliver to IT Lab, Tower A",
+        "status": "pending", "approval_stage": None,
+        "checker_approved_by": None, "checker_approved_date": None,
+        "approver_approved_by": None, "approver_approved_date": None,
+        "approved_by": None, "approval_date": None,
+        "rejection_reason": "",
+        "created_at": (now - timedelta(days=3)).isoformat()
+    })
+    reg("orders", ord_id)
+
+    if registry_entries:
+        await db.demo_data_registry.insert_many(registry_entries)
+
+    return len(registry_entries)
+
+
+@api_router.get("/demo-data/status")
+async def get_demo_data_status(current_user: User = Depends(get_current_user_hybrid)):
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        return {"has_demo_data": False, "count": 0}
+    count = await db.demo_data_registry.count_documents({"tenant_id": tenant_id})
+    return {"has_demo_data": count > 0, "count": count}
+
+
+@api_router.post("/demo-data/seed")
+async def reseed_demo_data(current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant associated with your account")
+    existing = await db.demo_data_registry.count_documents({"tenant_id": current_user.tenant_id})
+    if existing > 0:
+        raise HTTPException(status_code=400, detail="Demo data already exists. Delete it first before re-seeding.")
+    count = await seed_tenant_demo_data(current_user.tenant_id, current_user.id)
+    return {"message": "Demo data seeded successfully", "items_created": count}
+
+
+@api_router.delete("/demo-data")
+async def delete_demo_data(current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="No tenant associated with your account")
+    registry = await db.demo_data_registry.find({"tenant_id": tenant_id}, {"_id": 0}).to_list(2000)
+    by_collection: dict = {}
+    for entry in registry:
+        col = entry["collection"]
+        by_collection.setdefault(col, []).append(entry["item_id"])
+    deleted_count = 0
+    for collection_name, ids in by_collection.items():
+        result = await db[collection_name].delete_many({"id": {"$in": ids}})
+        deleted_count += result.deleted_count
+    await db.demo_data_registry.delete_many({"tenant_id": tenant_id})
+    await write_audit_log(current_user.id, "delete", "demo_data", tenant_id, f"Cleared {deleted_count} demo items")
+    return {"message": "Demo data cleared successfully", "items_deleted": deleted_count}
+
+
 # Include router
 app.include_router(api_router)
 
@@ -3831,6 +4484,12 @@ async def startup_db_client():
     await db.custom_fields.create_index("tenant_id", background=True)
     await db.api_keys.create_index("user_id", background=True)
     await db.api_keys.create_index("key", unique=True, background=True)
+    await db.invoices.create_index("tenant_id", background=True)
+    await db.invoices.create_index("created_at", background=True)
+    await db.asset_documents.create_index("asset_id", background=True)
+    await db.amc_contracts.create_index("asset_id", background=True)
+    await db.amc_contracts.create_index("tenant_id", background=True)
+    await db.demo_data_registry.create_index("tenant_id", background=True)
     await seed_default_tiers()
     asyncio.create_task(run_scheduled_alerts())
     logger.info("Database indexes created, default tiers seeded, and alert scheduler started.")

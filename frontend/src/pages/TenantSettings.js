@@ -10,7 +10,7 @@ import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Separator } from '../components/ui/separator';
-import { Palette, Upload, Settings, Building2, Bell } from 'lucide-react';
+import { Palette, Upload, Settings, Building2, Bell, Database, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -34,6 +34,8 @@ const TenantSettings = () => {
   const [selectedTenantId, setSelectedTenantId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [demoStatus, setDemoStatus] = useState(null);
+  const [demoLoading, setDemoLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     logo_url: '',
@@ -48,6 +50,7 @@ const TenantSettings = () => {
 
   useEffect(() => {
     fetchTenant();
+    fetchDemoStatus();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -81,6 +84,37 @@ const TenantSettings = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchDemoStatus = async () => {
+    if (!user?.tenant_id) return;
+    try {
+      const res = await axios.get(`${API}/demo-data/status`);
+      setDemoStatus(res.data);
+    } catch { /* silent */ }
+  };
+
+  const handleLoadDemo = async () => {
+    setDemoLoading(true);
+    try {
+      const res = await axios.post(`${API}/demo-data/seed`);
+      toast.success(res.data.message || 'Demo data loaded');
+      setDemoStatus({ has_demo_data: true });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to load demo data');
+    } finally { setDemoLoading(false); }
+  };
+
+  const handleDeleteDemo = async () => {
+    if (!window.confirm('This will permanently delete all demo data (assets, tickets, products, licenses, orders, vendors, departments). Cannot be undone. Continue?')) return;
+    setDemoLoading(true);
+    try {
+      const res = await axios.delete(`${API}/demo-data`);
+      toast.success(res.data.message || 'Demo data cleared');
+      setDemoStatus({ has_demo_data: false, count: 0 });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to delete demo data');
+    } finally { setDemoLoading(false); }
   };
 
   const handleSelectTenant = (tenantId) => {
@@ -369,6 +403,61 @@ const TenantSettings = () => {
               </div>
             </CardContent>
           </Card>
+
+          {/* Demo Data */}
+          {['tenant_admin', 'super_admin'].includes(user.role) && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="bg-amber-100 p-3 rounded-lg">
+                    <Database className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <CardTitle>Demo Data</CardTitle>
+                    <CardDescription>
+                      Load sample assets, tickets, products, licenses and more to explore the application.
+                      Delete it when you're ready to add real data.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {demoStatus?.has_demo_data ? (
+                  <div className="flex items-center justify-between p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="text-sm text-amber-800">
+                      <strong>Demo data is active.</strong> The app currently contains sample data for exploration.
+                    </div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleDeleteDemo}
+                      disabled={demoLoading}
+                      className="ml-4 whitespace-nowrap"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      {demoLoading ? 'Deleting...' : 'Delete Demo Data'}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="text-sm text-slate-600">
+                      No demo data loaded. Load sample data to see how the application looks with real content.
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleLoadDemo}
+                      disabled={demoLoading}
+                      className="ml-4 whitespace-nowrap"
+                    >
+                      <Database className="h-4 w-4 mr-2" />
+                      {demoLoading ? 'Loading...' : 'Load Demo Data'}
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Save Button */}
           <div className="flex justify-end gap-3">

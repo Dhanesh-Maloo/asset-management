@@ -18,6 +18,7 @@ import {
   CheckCircle,
   Key
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -30,10 +31,14 @@ const Dashboard = () => {
   const [stats, setStats] = useState({});
   const [charts, setCharts] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [demoStatus, setDemoStatus] = useState(null);
+  const [clearingDemo, setClearingDemo] = useState(false);
 
   useEffect(() => {
     fetchStats();
     fetchCharts();
+    fetchDemoStatus();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchStats = async () => {
@@ -56,6 +61,34 @@ const Dashboard = () => {
     }
   };
 
+  const fetchDemoStatus = async () => {
+    if (!user?.tenant_id) return;
+    try {
+      const res = await axios.get(`${API}/demo-data/status`);
+      setDemoStatus(res.data);
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleClearDemo = async () => {
+    if (!window.confirm(
+      'This will permanently delete all demo data (assets, tickets, products, licenses, orders, vendors, departments, locations).\n\nThis cannot be undone. Continue?'
+    )) return;
+    setClearingDemo(true);
+    try {
+      const res = await axios.delete(`${API}/demo-data`);
+      toast.success(res.data.message || 'Demo data cleared successfully');
+      setDemoStatus({ has_demo_data: false, count: 0 });
+      fetchStats();
+      fetchCharts();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to clear demo data');
+    } finally {
+      setClearingDemo(false);
+    }
+  };
+
   const statCards = [
     { label: 'Total Assets', value: stats.total_assets || 0, icon: Laptop, color: 'bg-blue-500', link: '/assets' },
     { label: 'Assigned Assets', value: stats.assigned_assets || 0, icon: CheckCircle, color: 'bg-green-500', link: '/assets' },
@@ -73,6 +106,26 @@ const Dashboard = () => {
 
   return (
     <DashboardLayout>
+      {/* Demo Data Banner */}
+      {demoStatus?.has_demo_data && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2 text-amber-800 text-sm">
+            <span className="text-lg">🎯</span>
+            <span>
+              <strong>You're viewing demo data.</strong>
+              {' '}This is sample data to help you explore the application. Delete it when you're ready to add your real data.
+            </span>
+          </div>
+          <button
+            onClick={handleClearDemo}
+            disabled={clearingDemo}
+            className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {clearingDemo ? 'Clearing...' : 'Clear Demo Data'}
+          </button>
+        </div>
+      )}
+
       <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="dashboard-page">
         {/* Header */}
         <div className="mb-8">

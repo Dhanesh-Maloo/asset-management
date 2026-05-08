@@ -18,7 +18,8 @@ import {
   ArrowLeft, DollarSign, Shield, Wrench,
   LogOut as ReturnIcon, LogIn as CheckoutIcon, TrendingDown,
   Plus, AlertCircle, CheckCircle, QrCode, Printer, Clock,
-  Camera, Trash2, ArrowRightLeft, Settings2
+  Camera, Trash2, ArrowRightLeft, Settings2, FileText, Upload,
+  Download, XCircle, Wrench as AMCIcon, RefreshCw
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
@@ -215,16 +216,54 @@ const AssetDetail = () => {
   const handlePrintQR = () => {
     const printWindow = window.open('', '_blank');
     const qrSvg = document.getElementById('asset-qr-code')?.outerHTML || '';
-    printWindow.document.write(`
-      <html><body style="text-align:center;padding:40px;font-family:Arial,sans-serif;">
-        <h2>${asset?.asset_tag}</h2>
-        <p style="color:#666;">${product?.name || ''}</p>
-        ${qrSvg}
-        <p style="font-size:12px;color:#999;margin-top:8px;">${asset?.serial_number || ''}</p>
-      </body></html>
-    `);
+    const dept = asset?.department_name || '';
+    const location = asset?.location || '';
+    const assignedName = assignedUser?.name || '';
+    const purchaseDate = asset?.purchase_date ? new Date(asset.purchase_date).toLocaleDateString() : '';
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Asset Label — ${asset?.asset_tag}</title>
+  <style>
+    @page { size: 3.5in 2in; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; width: 3.5in; height: 2in; display: flex; align-items: stretch; background: #fff; }
+    .label { width: 100%; border: 2px solid #000; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; padding: 6px 8px; }
+    .header { background: #1e293b; color: #fff; text-align: center; font-size: 9px; font-weight: bold; letter-spacing: 1.5px; padding: 3px 0; margin: -6px -8px 6px -8px; text-transform: uppercase; }
+    .body { display: flex; flex: 1; gap: 8px; align-items: center; }
+    .qr-wrap svg { width: 80px !important; height: 80px !important; }
+    .info { flex: 1; min-width: 0; }
+    .asset-tag { font-size: 17px; font-weight: 900; letter-spacing: 1px; line-height: 1.2; }
+    .product-name { font-size: 9px; color: #555; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    hr { border: none; border-top: 1px solid #ddd; margin: 4px 0; }
+    .row { display: flex; justify-content: space-between; font-size: 8px; color: #666; margin-top: 2px; }
+    .row .lbl { font-weight: bold; color: #333; }
+    .serial { font-family: 'Courier New', monospace; font-size: 8px; color: #555; margin-top: 3px; }
+    .footer { font-size: 7px; color: #aaa; text-align: center; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="label">
+    <div class="header">IT Asset Management</div>
+    <div class="body">
+      <div class="qr-wrap">${qrSvg}</div>
+      <div class="info">
+        <div class="asset-tag">${asset?.asset_tag || ''}</div>
+        <div class="product-name">${product?.name || ''}</div>
+        <hr />
+        ${dept ? `<div class="row"><span class="lbl">Dept</span><span>${dept}</span></div>` : ''}
+        ${location ? `<div class="row"><span class="lbl">Location</span><span>${location}</span></div>` : ''}
+        ${assignedName ? `<div class="row"><span class="lbl">Assigned</span><span>${assignedName}</span></div>` : ''}
+        ${purchaseDate ? `<div class="row"><span class="lbl">Purchased</span><span>${purchaseDate}</span></div>` : ''}
+        <div class="serial">S/N: ${asset?.serial_number || 'N/A'}</div>
+      </div>
+    </div>
+    <div class="footer">Scan QR code to view full asset details</div>
+  </div>
+</body>
+</html>`);
     printWindow.document.close();
-    printWindow.print();
+    setTimeout(() => { printWindow.print(); }, 300);
   };
 
   const canManage = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
@@ -282,6 +321,114 @@ const AssetDetail = () => {
       toast.success('Custom fields saved');
     } catch { toast.error('Failed to save custom fields'); }
     finally { setCustomSaving(false); }
+  };
+
+  // ── Documents (Feature 2) ─────────────────────────────────────────────────
+  const [documents, setDocuments] = useState([]);
+  const [docUploading, setDocUploading] = useState(false);
+  const [docType, setDocType] = useState('other');
+  const [docNotes, setDocNotes] = useState('');
+
+  useEffect(() => { if (assetId) fetchDocuments(); }, [assetId]); // eslint-disable-line
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await axios.get(`${API}/assets/${assetId}/documents`);
+      setDocuments(res.data);
+    } catch { /* ignore */ }
+  };
+
+  const handleDocUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setDocUploading(true);
+    try {
+      await axios.post(`${API}/assets/${assetId}/documents?document_type=${docType}&notes=${encodeURIComponent(docNotes)}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success('Document uploaded');
+      setDocNotes('');
+      fetchDocuments();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+    finally { setDocUploading(false); }
+  };
+
+  const handleDocDelete = async (docId) => {
+    if (!window.confirm('Delete this document?')) return;
+    try {
+      await axios.delete(`${API}/assets/${assetId}/documents/${docId}`);
+      toast.success('Document deleted');
+      fetchDocuments();
+    } catch { toast.error('Failed to delete document'); }
+  };
+
+  const handleDocDownload = (docId, filename) => {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+    const link = document.createElement('a');
+    link.href = `${API}/assets/${assetId}/documents/${docId}/download`;
+    link.setAttribute('download', filename);
+    // Use fetch with auth header
+    fetch(`${API}/assets/${assetId}/documents/${docId}/download`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob()).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      }).catch(() => toast.error('Download failed'));
+  };
+
+  // ── AMC Contracts (Feature 8) ─────────────────────────────────────────────
+  const [amcContracts, setAmcContracts] = useState([]);
+  const [amcDialogOpen, setAmcDialogOpen] = useState(false);
+  const [amcForm, setAmcForm] = useState({ vendor_name: '', contract_number: '', start_date: '', end_date: '', annual_cost: 0, renewal_reminder_days: 30, notes: '' });
+  const [amcSaving, setAmcSaving] = useState(false);
+
+  useEffect(() => { if (assetId) fetchAMC(); }, [assetId]); // eslint-disable-line
+
+  const fetchAMC = async () => {
+    try {
+      const res = await axios.get(`${API}/assets/${assetId}/amc`);
+      setAmcContracts(res.data);
+    } catch { /* ignore */ }
+  };
+
+  const handleAddAMC = async () => {
+    if (!amcForm.vendor_name || !amcForm.start_date || !amcForm.end_date) { toast.error('Fill required fields'); return; }
+    setAmcSaving(true);
+    try {
+      await axios.post(`${API}/assets/${assetId}/amc`, amcForm);
+      toast.success('AMC contract added');
+      setAmcDialogOpen(false);
+      setAmcForm({ vendor_name: '', contract_number: '', start_date: '', end_date: '', annual_cost: 0, renewal_reminder_days: 30, notes: '' });
+      fetchAMC();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to add AMC contract'); }
+    finally { setAmcSaving(false); }
+  };
+
+  const handleDeleteAMC = async (contractId) => {
+    if (!window.confirm('Delete this AMC contract?')) return;
+    try {
+      await axios.delete(`${API}/amc/${contractId}`);
+      toast.success('AMC contract deleted');
+      fetchAMC();
+    } catch { toast.error('Failed to delete AMC contract'); }
+  };
+
+  // ── Asset Disposal (Feature 3) ────────────────────────────────────────────
+  const [disposeDialogOpen, setDisposeDialogOpen] = useState(false);
+  const [disposeForm, setDisposeForm] = useState({ disposal_method: 'scrapped', disposal_date: '', disposal_notes: '', sale_proceeds: 0 });
+  const [disposeSaving, setDisposeSaving] = useState(false);
+
+  const handleDispose = async () => {
+    if (!disposeForm.disposal_date) { toast.error('Please enter disposal date'); return; }
+    setDisposeSaving(true);
+    try {
+      await axios.post(`${API}/assets/${assetId}/dispose`, disposeForm);
+      toast.success('Asset marked as disposed');
+      setDisposeDialogOpen(false);
+      fetchAssetDetails();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to dispose asset'); }
+    finally { setDisposeSaving(false); }
   };
 
   // ── Transfer Request ──────────────────────────────────────────────────────
@@ -358,6 +505,12 @@ const AssetDetail = () => {
                 <Plus className="h-4 w-4 mr-2" />
                 Schedule Maintenance
               </Button>
+              {asset.status !== 'disposed' && (
+                <Button variant="destructive" onClick={() => setDisposeDialogOpen(true)}>
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Dispose
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -369,6 +522,12 @@ const AssetDetail = () => {
             <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
             <TabsTrigger value="warranty">Warranty</TabsTrigger>
             <TabsTrigger value="depreciation">Depreciation</TabsTrigger>
+            <TabsTrigger value="documents">
+              Documents {documents.length > 0 && <span className="ml-1 bg-primary text-white text-xs px-1.5 py-0.5 rounded-full">{documents.length}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="amc">
+              AMC {amcContracts.length > 0 && <span className="ml-1 bg-green-600 text-white text-xs px-1.5 py-0.5 rounded-full">{amcContracts.length}</span>}
+            </TabsTrigger>
             <TabsTrigger value="qrcode">QR Code</TabsTrigger>
             <TabsTrigger value="photo">Photo</TabsTrigger>
             {customFields.length > 0 && <TabsTrigger value="custom">Custom Fields</TabsTrigger>}
@@ -396,6 +555,18 @@ const AssetDetail = () => {
                     <p className="text-sm text-muted-foreground">Location</p>
                     <p>{asset.location || 'Not specified'}</p>
                   </div>
+                  {asset.is_leased && (
+                    <>
+                      <Separator />
+                      <div>
+                        <p className="text-sm text-muted-foreground">Ownership</p>
+                        <Badge className="bg-blue-100 text-blue-800 border-blue-300 mt-1">Leased</Badge>
+                      </div>
+                      {asset.lessor_name && <div><p className="text-sm text-muted-foreground">Lessor</p><p className="font-medium">{asset.lessor_name}</p></div>}
+                      {asset.lease_end_date && <div><p className="text-sm text-muted-foreground">Lease Ends</p><p>{new Date(asset.lease_end_date).toLocaleDateString()}</p></div>}
+                      {asset.monthly_lease_payment > 0 && <div><p className="text-sm text-muted-foreground">Monthly Payment</p><p>₹{asset.monthly_lease_payment.toLocaleString()}</p></div>}
+                    </>
+                  )}
                   {(asset.assigned_to || asset.checked_out_to) && assignedUser && (
                     <>
                       <Separator />
@@ -421,6 +592,20 @@ const AssetDetail = () => {
                           <p>{new Date(asset.expected_return_date).toLocaleDateString()}</p>
                         </div>
                       )}
+                    </>
+                  )}
+                  {asset.status === 'disposed' && asset.disposal_date && (
+                    <>
+                      <Separator />
+                      <div className="p-3 bg-slate-100 rounded-lg">
+                        <p className="text-sm font-semibold text-slate-600 mb-2">Disposal Information</p>
+                        <div className="space-y-1 text-sm">
+                          <div><span className="text-muted-foreground">Date: </span>{new Date(asset.disposal_date).toLocaleDateString()}</div>
+                          <div><span className="text-muted-foreground">Method: </span><span className="capitalize">{asset.disposal_method || '—'}</span></div>
+                          {asset.sale_proceeds > 0 && <div><span className="text-muted-foreground">Sale Proceeds: </span>₹{asset.sale_proceeds.toLocaleString()}</div>}
+                          {asset.disposal_notes && <div><span className="text-muted-foreground">Notes: </span>{asset.disposal_notes}</div>}
+                        </div>
+                      </div>
                     </>
                   )}
                 </CardContent>
@@ -776,6 +961,136 @@ const AssetDetail = () => {
             </Card>
           </TabsContent>
 
+          {/* Documents Tab (Feature 2) */}
+          <TabsContent value="documents">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 p-3 rounded-lg"><FileText className="h-6 w-6 text-blue-600" /></div>
+                    <div><CardTitle>Documents</CardTitle><CardDescription>Invoices, warranties, AMC contracts, insurance certificates</CardDescription></div>
+                  </div>
+                  {canManage && (
+                    <div className="flex items-center gap-2">
+                      <select value={docType} onChange={e => setDocType(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
+                        <option value="invoice">Invoice</option>
+                        <option value="warranty">Warranty Card</option>
+                        <option value="amc">AMC Contract</option>
+                        <option value="insurance">Insurance</option>
+                        <option value="other">Other</option>
+                      </select>
+                      <label className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-lg cursor-pointer hover:bg-primary/90 text-sm font-medium">
+                        <Upload className="h-4 w-4" />
+                        {docUploading ? 'Uploading...' : 'Upload'}
+                        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" onChange={handleDocUpload} className="hidden" disabled={docUploading} />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {documents.length === 0 ? (
+                  <div className="text-center py-12">
+                    <FileText className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">No documents attached yet</p>
+                    <p className="text-sm text-slate-400 mt-1">Upload invoices, warranty cards, contracts, or insurance documents</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {documents.map(doc => (
+                      <div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-8 w-8 text-blue-500 shrink-0" />
+                          <div>
+                            <p className="font-medium text-sm">{doc.filename}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs capitalize px-2 py-0.5 bg-slate-100 rounded-full text-slate-600">{doc.document_type}</span>
+                              <span className="text-xs text-slate-400">{(doc.file_size / 1024).toFixed(1)} KB</span>
+                              <span className="text-xs text-slate-400">{new Date(doc.created_at).toLocaleDateString()}</span>
+                            </div>
+                            {doc.notes && <p className="text-xs text-slate-500 mt-0.5">{doc.notes}</p>}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleDocDownload(doc.id, doc.filename)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                            <Download className="h-4 w-4" />
+                          </button>
+                          {canManage && (
+                            <button onClick={() => handleDocDelete(doc.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* AMC Contracts Tab (Feature 8) */}
+          <TabsContent value="amc">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-green-100 p-3 rounded-lg"><RefreshCw className="h-6 w-6 text-green-600" /></div>
+                    <div><CardTitle>AMC Contracts</CardTitle><CardDescription>Annual Maintenance Contract tracking</CardDescription></div>
+                  </div>
+                  {canManage && (
+                    <Button onClick={() => setAmcDialogOpen(true)}>
+                      <Plus className="h-4 w-4 mr-2" /> Add Contract
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {amcContracts.length === 0 ? (
+                  <div className="text-center py-12">
+                    <RefreshCw className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">No AMC contracts yet</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {amcContracts.map(c => {
+                      const endDate = new Date(c.end_date);
+                      const daysLeft = Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
+                      const isExpired = daysLeft < 0;
+                      const isExpiring = daysLeft >= 0 && daysLeft <= c.renewal_reminder_days;
+                      return (
+                        <div key={c.id} className={`p-4 border rounded-lg ${isExpired ? 'border-red-200 bg-red-50' : isExpiring ? 'border-orange-200 bg-orange-50' : 'border-slate-200'}`}>
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="font-semibold">{c.vendor_name}</p>
+                                {isExpired && <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full">Expired</span>}
+                                {isExpiring && !isExpired && <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full">Expiring in {daysLeft} days</span>}
+                                {!isExpired && !isExpiring && <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Active</span>}
+                              </div>
+                              {c.contract_number && <p className="text-sm text-slate-500">Contract #: {c.contract_number}</p>}
+                              <div className="grid grid-cols-3 gap-3 mt-2 text-sm">
+                                <div><span className="text-slate-400 text-xs">Start</span><p>{new Date(c.start_date).toLocaleDateString()}</p></div>
+                                <div><span className="text-slate-400 text-xs">End</span><p>{new Date(c.end_date).toLocaleDateString()}</p></div>
+                                <div><span className="text-slate-400 text-xs">Annual Cost</span><p>₹{c.annual_cost.toLocaleString()}</p></div>
+                              </div>
+                              {c.notes && <p className="text-xs text-slate-500 mt-2">{c.notes}</p>}
+                            </div>
+                            {canManage && (
+                              <button onClick={() => handleDeleteAMC(c.id)} className="ml-3 p-2 text-red-500 hover:bg-red-100 rounded-lg">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Custom Fields Tab */}
           {customFields.length > 0 && (
             <TabsContent value="custom">
@@ -950,6 +1265,96 @@ const AssetDetail = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setMaintenanceDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleScheduleMaintenance} data-testid="confirm-maintenance-btn">Schedule</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add AMC Contract Dialog (Feature 8) */}
+      <Dialog open={amcDialogOpen} onOpenChange={setAmcDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add AMC Contract</DialogTitle>
+            <DialogDescription>Track an Annual Maintenance Contract for this asset</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Vendor Name *</Label>
+              <input value={amcForm.vendor_name} onChange={e => setAmcForm({...amcForm, vendor_name: e.target.value})} placeholder="e.g. TechCare Services" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <Label>Contract Number</Label>
+              <input value={amcForm.contract_number} onChange={e => setAmcForm({...amcForm, contract_number: e.target.value})} placeholder="e.g. AMC/2024/001" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Start Date *</Label>
+                <input type="date" value={amcForm.start_date} onChange={e => setAmcForm({...amcForm, start_date: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <Label>End Date *</Label>
+                <input type="date" value={amcForm.end_date} onChange={e => setAmcForm({...amcForm, end_date: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Annual Cost (₹)</Label>
+                <input type="number" min="0" value={amcForm.annual_cost} onChange={e => setAmcForm({...amcForm, annual_cost: parseFloat(e.target.value) || 0})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <Label>Renewal Reminder (days before)</Label>
+                <input type="number" min="1" max="180" value={amcForm.renewal_reminder_days} onChange={e => setAmcForm({...amcForm, renewal_reminder_days: parseInt(e.target.value) || 30})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <textarea value={amcForm.notes} onChange={e => setAmcForm({...amcForm, notes: e.target.value})} rows={2} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAmcDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleAddAMC} disabled={amcSaving}>{amcSaving ? 'Saving...' : 'Add Contract'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dispose Asset Dialog (Feature 3) */}
+      <Dialog open={disposeDialogOpen} onOpenChange={setDisposeDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Dispose / Write-off Asset</DialogTitle>
+            <DialogDescription>Mark <strong>{asset?.asset_tag}</strong> as disposed. The record is preserved for audit purposes.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Disposal Method *</Label>
+              <select value={disposeForm.disposal_method} onChange={e => setDisposeForm({...disposeForm, disposal_method: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                <option value="sold">Sold</option>
+                <option value="scrapped">Scrapped</option>
+                <option value="donated">Donated</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <Label>Disposal Date *</Label>
+              <input type="date" value={disposeForm.disposal_date} onChange={e => setDisposeForm({...disposeForm, disposal_date: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            {disposeForm.disposal_method === 'sold' && (
+              <div>
+                <Label>Sale Proceeds (₹)</Label>
+                <input type="number" min="0" value={disposeForm.sale_proceeds} onChange={e => setDisposeForm({...disposeForm, sale_proceeds: parseFloat(e.target.value) || 0})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            )}
+            <div>
+              <Label>Notes / Reason</Label>
+              <textarea value={disposeForm.disposal_notes} onChange={e => setDisposeForm({...disposeForm, disposal_notes: e.target.value})} rows={3} placeholder="Reason for disposal..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              This asset will be marked as <strong>Disposed</strong>. The record will be kept for compliance and audit. This is different from deleting.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDisposeDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDispose} disabled={disposeSaving}>{disposeSaving ? 'Processing...' : 'Confirm Disposal'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

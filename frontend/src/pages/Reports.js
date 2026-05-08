@@ -8,7 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from 'recharts';
-import { FileBarChart, Download, AlertTriangle, Laptop, Wrench, TrendingDown } from 'lucide-react';
+import { FileBarChart, Download, AlertTriangle, Laptop, Wrench, TrendingDown, Printer } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -59,8 +59,13 @@ const Reports = () => {
     URL.revokeObjectURL(url);
   };
 
+  const printReport = () => {
+    window.print();
+  };
+
   return (
     <DashboardLayout>
+      <style>{`@media print { nav, aside, header, .print\\:hidden { display: none !important; } body { background: white; } }`}</style>
       <div className="p-6 md:p-10 max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -70,10 +75,16 @@ const Reports = () => {
             <p className="text-slate-500 mt-1">Advanced analytics and insights</p>
           </div>
           {data && data.length > 0 && (
-            <button onClick={downloadCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-              <Download className="h-4 w-4" /> Export CSV
-            </button>
+            <div className="flex gap-2">
+              <button onClick={downloadCSV}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                <Download className="h-4 w-4" /> Export CSV
+              </button>
+              <button onClick={printReport}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors print:hidden">
+                <Printer className="h-4 w-4" /> Save as PDF
+              </button>
+            </div>
           )}
         </div>
 

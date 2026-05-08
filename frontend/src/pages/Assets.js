@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil } from 'lucide-react';
+import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -38,8 +38,10 @@ const Assets = () => {
   const [assetForm, setAssetForm] = useState({
     asset_tag: '', product_id: '', serial_number: '', tenant_id: '', location: '',
     purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20,
-    expiry_date: '', is_demo: false
+    expiry_date: '', is_demo: false,
+    is_leased: false, lessor_name: '', lease_start_date: '', lease_end_date: '', monthly_lease_payment: 0
   });
+  const [serialExists, setSerialExists] = useState(null); // null | {exists, asset_tag}
 
   useEffect(() => {
     fetchData();
@@ -132,18 +134,83 @@ const Assets = () => {
 
   const handleExportCSV = async () => {
     try {
-      const response = await axios.get(`${API}/assets/export/csv`, {
-        responseType: 'blob'
-      });
+      const response = await axios.get(`${API}/assets/export/csv`, { responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
       const a = document.createElement('a');
-      a.href = url;
-      a.download = 'assets_export.csv';
-      a.click();
+      a.href = url; a.download = 'assets_export.csv'; a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
       toast.error('Failed to export CSV');
     }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const response = await axios.get(`${API}/assets/export/xlsx`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      }));
+      const a = document.createElement('a');
+      a.href = url; a.download = 'assets_export.xlsx'; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Excel file downloaded');
+    } catch (error) {
+      toast.error('Failed to export Excel');
+    }
+  };
+
+  // Feature 10: Batch Label Printing
+  const handlePrintLabels = () => {
+    const selectedAssets = assets.filter(a => selectedIds.includes(a.id));
+    if (selectedAssets.length === 0) return;
+    const printWindow = window.open('', '_blank');
+    const labelsHtml = selectedAssets.map(a => {
+      const productName = products[a.product_id]?.name || 'Unknown';
+      const qrValue = `${window.location.origin}/assets/${a.id}`;
+      return `
+        <div class="label">
+          <div class="header">IT Asset Management</div>
+          <div class="body">
+            <div class="qr-placeholder" data-value="${qrValue}" data-tag="${a.asset_tag}">
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrValue)}" width="80" height="80" />
+            </div>
+            <div class="info">
+              <div class="asset-tag">${a.asset_tag}</div>
+              <div class="product-name">${productName}</div>
+              <hr />
+              ${a.location ? `<div class="row"><span class="lbl">Location</span><span>${a.location}</span></div>` : ''}
+              <div class="serial">S/N: ${a.serial_number}</div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Asset Labels</title>
+      <style>
+        @page { margin: 0.5cm; }
+        body { font-family: Arial, sans-serif; display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+        .label { width: 3.5in; height: 2in; border: 2px solid #000; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; padding: 6px 8px; box-sizing: border-box; page-break-inside: avoid; }
+        .header { background: #1e293b; color: #fff; text-align: center; font-size: 9px; font-weight: bold; letter-spacing: 1.5px; padding: 3px 0; margin: -6px -8px 6px -8px; text-transform: uppercase; }
+        .body { display: flex; flex: 1; gap: 8px; align-items: center; }
+        .info { flex: 1; min-width: 0; }
+        .asset-tag { font-size: 17px; font-weight: 900; letter-spacing: 1px; }
+        .product-name { font-size: 9px; color: #555; }
+        hr { border: none; border-top: 1px solid #ddd; margin: 3px 0; }
+        .row { display: flex; justify-content: space-between; font-size: 8px; color: #666; }
+        .lbl { font-weight: bold; color: #333; }
+        .serial { font-family: monospace; font-size: 8px; color: #555; margin-top: 2px; }
+      </style></head><body>${labelsHtml}</body></html>`);
+    printWindow.document.close();
+    setTimeout(() => { printWindow.print(); }, 500);
+  };
+
+  // Feature 13: Serial number duplicate check
+  const checkSerialNumber = async (sn) => {
+    if (!sn || sn.length < 3) { setSerialExists(null); return; }
+    try {
+      const tid = user.tenant_id || 'default';
+      const res = await axios.get(`${API}/assets/check-serial`, { params: { serial_number: sn, tenant_id: tid } });
+      setSerialExists(res.data);
+    } catch { setSerialExists(null); }
   };
 
   const handleAddAsset = async (e) => {
@@ -155,7 +222,8 @@ const Assets = () => {
       });
       toast.success('Asset added successfully');
       setAddAssetDialogOpen(false);
-      setAssetForm({ asset_tag: '', product_id: '', serial_number: '', tenant_id: '', location: '', purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20, expiry_date: '', is_demo: false });
+      setAssetForm({ asset_tag: '', product_id: '', serial_number: '', tenant_id: '', location: '', purchase_price: 0, purchase_date: '', depreciation_method: 'straight_line', depreciation_rate: 20, expiry_date: '', is_demo: false, is_leased: false, lessor_name: '', lease_start_date: '', lease_end_date: '', monthly_lease_payment: 0 });
+      setSerialExists(null);
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to add asset');
@@ -221,7 +289,13 @@ const Assets = () => {
             {canManage && (
               <Button variant="outline" onClick={handleExportCSV}>
                 <Download className="h-4 w-4 mr-2" />
-                Export CSV
+                CSV
+              </Button>
+            )}
+            {canManage && (
+              <Button variant="outline" onClick={handleExportExcel}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Excel
               </Button>
             )}
             {canManage && (
@@ -241,6 +315,10 @@ const Assets = () => {
               <button onClick={() => setBulkEditOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary/90">
                 <Pencil className="h-3.5 w-3.5" /> Bulk Edit
+              </button>
+              <button onClick={handlePrintLabels}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 text-white text-sm rounded-lg hover:bg-slate-800">
+                <Printer className="h-3.5 w-3.5" /> Print Labels
               </button>
               <button onClick={() => setSelectedIds([])}
                 className="text-sm text-slate-500 hover:text-slate-700 underline">
@@ -489,7 +567,12 @@ const Assets = () => {
               </div>
               <div>
                 <Label htmlFor="serial-number">Serial Number *</Label>
-                <Input id="serial-number" value={assetForm.serial_number} onChange={(e) => setAssetForm({ ...assetForm, serial_number: e.target.value })} placeholder="SN-ABC123" required data-testid="asset-serial-input" />
+                <Input id="serial-number" value={assetForm.serial_number} onChange={(e) => { setAssetForm({ ...assetForm, serial_number: e.target.value }); checkSerialNumber(e.target.value); }} placeholder="SN-ABC123" required data-testid="asset-serial-input" className={serialExists?.exists ? 'border-orange-400' : ''} />
+                {serialExists?.exists && (
+                  <p className="text-xs text-orange-600 flex items-center gap-1 mt-1">
+                    <AlertTriangle className="h-3 w-3" /> Duplicate: already used by <strong>{serialExists.asset_tag}</strong>
+                  </p>
+                )}
               </div>
             </div>
             <div>
@@ -557,6 +640,39 @@ const Assets = () => {
                 <p className="text-xs text-amber-600 mt-1">This asset will be marked as a demo and visible in the Demo Assets filter.</p>
               )}
             </div>
+            <div>
+              <Label>Ownership Type</Label>
+              <Select value={assetForm.is_leased ? 'leased' : 'owned'} onValueChange={(val) => setAssetForm({ ...assetForm, is_leased: val === 'leased' })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="owned">Owned</SelectItem>
+                  <SelectItem value="leased">Leased</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {assetForm.is_leased && (
+              <div className="space-y-3 p-3 border border-blue-200 rounded-lg bg-blue-50">
+                <p className="text-xs font-semibold text-blue-700">Lease Details</p>
+                <div>
+                  <Label>Lessor Name</Label>
+                  <Input value={assetForm.lessor_name} onChange={e => setAssetForm({ ...assetForm, lessor_name: e.target.value })} placeholder="e.g. ABC Leasing Pvt Ltd" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Lease Start Date</Label>
+                    <Input type="date" value={assetForm.lease_start_date} onChange={e => setAssetForm({ ...assetForm, lease_start_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label>Lease End Date</Label>
+                    <Input type="date" value={assetForm.lease_end_date} onChange={e => setAssetForm({ ...assetForm, lease_end_date: e.target.value })} />
+                  </div>
+                </div>
+                <div>
+                  <Label>Monthly Payment (₹)</Label>
+                  <Input type="number" min="0" value={assetForm.monthly_lease_payment} onChange={e => setAssetForm({ ...assetForm, monthly_lease_payment: parseFloat(e.target.value) || 0 })} />
+                </div>
+              </div>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAddAssetDialogOpen(false)}>Cancel</Button>
               <Button type="submit" data-testid="submit-asset-btn">Add Asset</Button>

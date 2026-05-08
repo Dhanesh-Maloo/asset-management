@@ -7,7 +7,9 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Progress } from '../components/ui/progress';
 import { Separator } from '../components/ui/separator';
-import { Crown, Check, AlertTriangle, Users, Laptop, ShoppingCart, Ticket, Zap } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Crown, Check, AlertTriangle, Users, Laptop, ShoppingCart, Ticket, Zap, FileText, Download, Mail, CalendarDays, ArrowUpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -19,11 +21,20 @@ const TIER_STYLES = {
   enterprise: { border: 'border-amber-400', badge: 'bg-amber-100 text-amber-700', icon: 'text-amber-500', gradient: 'from-amber-50 to-orange-50' },
 };
 
+const STATUS_STYLES = {
+  paid: 'bg-emerald-100 text-emerald-700',
+  pending: 'bg-amber-100 text-amber-700',
+  overdue: 'bg-red-100 text-red-700',
+};
+
 const Subscription = () => {
   const { user } = useAuth();
   const [tiers, setTiers] = useState([]);
   const [usage, setUsage] = useState(null);
+  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [selectedTier, setSelectedTier] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -32,12 +43,15 @@ const Subscription = () => {
 
   const fetchData = async () => {
     try {
-      const [tiersRes, usageRes] = await Promise.all([
+      const requests = [
         axios.get(`${API}/subscription-tiers`),
         user.tenant_id ? axios.get(`${API}/tenants/${user.tenant_id}/usage`) : Promise.resolve({ data: null }),
-      ]);
+        axios.get(`${API}/invoices`),
+      ];
+      const [tiersRes, usageRes, invoicesRes] = await Promise.all(requests);
       setTiers(tiersRes.data);
       setUsage(usageRes.data);
+      setInvoices(invoicesRes.data || []);
     } catch (error) {
       console.error('Failed to fetch subscription data', error);
       toast.error('Failed to load subscription data');
@@ -60,6 +74,67 @@ const Subscription = () => {
 
   const formatLimit = (val) => (val === -1 ? 'Unlimited' : val);
 
+  const formatCurrency = (amount, currency = 'USD') => {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const handleDownloadInvoice = (invoice) => {
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html>
+<html><head><title>Invoice #${invoice.id.slice(0, 8).toUpperCase()}</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 40px; color: #111; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
+  h1 { font-size: 28px; font-weight: 900; margin: 0; }
+  .meta { text-align: right; font-size: 13px; color: #555; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; background: ${invoice.status === 'paid' ? '#d1fae5' : invoice.status === 'overdue' ? '#fee2e2' : '#fef3c7'}; color: ${invoice.status === 'paid' ? '#065f46' : invoice.status === 'overdue' ? '#991b1b' : '#92400e'}; }
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+  th { background: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 13px; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+  .total { font-weight: bold; font-size: 16px; }
+  .footer { margin-top: 40px; font-size: 12px; color: #aaa; text-align: center; }
+</style>
+</head><body>
+<div class="header">
+  <div><h1>INVOICE</h1><p style="color:#555;margin-top:4px">IT Asset Management Platform</p></div>
+  <div class="meta">
+    <div><strong>Invoice #</strong> ${invoice.id.slice(0, 8).toUpperCase()}</div>
+    <div><strong>Date:</strong> ${formatDate(invoice.created_at)}</div>
+    <div style="margin-top:6px"><span class="badge">${invoice.status.toUpperCase()}</span></div>
+  </div>
+</div>
+<table>
+  <thead><tr><th>Description</th><th>Period</th><th>Amount</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>${invoice.description}</td>
+      <td>${formatDate(invoice.period_start)} – ${formatDate(invoice.period_end)}</td>
+      <td class="total">${formatCurrency(invoice.amount, invoice.currency)}</td>
+    </tr>
+  </tbody>
+</table>
+${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid on: ${formatDate(invoice.paid_at)}</p>` : ''}
+<div class="footer">Thank you for using our platform.</div>
+</body></html>`);
+    w.document.close();
+    setTimeout(() => w.print(), 300);
+  };
+
+  const openUpgradeDialog = (tier) => {
+    setSelectedTier(tier);
+    setUpgradeOpen(true);
+  };
+
+  const handleUpgradeRequest = () => {
+    toast.success(`Upgrade request for ${selectedTier?.name} plan sent to your administrator.`);
+    setUpgradeOpen(false);
+  };
+
   const currentTierSlug = usage?.tier?.slug || 'free';
   const style = (slug) => TIER_STYLES[slug] || TIER_STYLES.free;
 
@@ -76,10 +151,10 @@ const Subscription = () => {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
-            Subscription & Usage
+            Subscription & Billing
           </h1>
           <p className="text-base text-muted-foreground">
-            Monitor your plan, usage, and explore available tiers
+            Monitor your plan, usage, billing history, and explore available tiers
           </p>
         </div>
 
@@ -91,15 +166,23 @@ const Subscription = () => {
           </div>
         ) : (
           <>
-            {/* Current Plan + Usage Dashboard */}
+            {/* Current Plan + Usage */}
             {usage && (
               <div className="mb-10">
-                <div className="flex items-center gap-2 mb-5">
-                  <Crown className={`h-5 w-5 ${style(currentTierSlug).icon}`} />
-                  <h2 className="text-xl font-semibold font-heading">Current Plan</h2>
-                  <Badge className={style(currentTierSlug).badge} data-testid="current-tier-badge">
-                    {usage.tier?.name}
-                  </Badge>
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2">
+                    <Crown className={`h-5 w-5 ${style(currentTierSlug).icon}`} />
+                    <h2 className="text-xl font-semibold font-heading">Current Plan</h2>
+                    <Badge className={style(currentTierSlug).badge} data-testid="current-tier-badge">
+                      {usage.tier?.name}
+                    </Badge>
+                  </div>
+                  {usage.subscription_started_at && (
+                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <CalendarDays className="h-4 w-4" />
+                      <span>Active since {formatDate(usage.subscription_started_at)}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -144,7 +227,7 @@ const Subscription = () => {
             <Separator className="my-8" />
 
             {/* Available Plans */}
-            <div>
+            <div className="mb-10">
               <div className="flex items-center gap-2 mb-5">
                 <Zap className="h-5 w-5 text-primary" />
                 <h2 className="text-xl font-semibold font-heading">Available Plans</h2>
@@ -154,6 +237,7 @@ const Subscription = () => {
                 {tiers.map((tier) => {
                   const isCurrent = tier.id === usage?.tier?.id;
                   const s = style(tier.slug);
+                  const isUpgrade = tier.sort_order > (usage?.tier?.sort_order || 0);
                   return (
                     <Card
                       key={tier.id}
@@ -184,8 +268,14 @@ const Subscription = () => {
                             Current Plan
                           </Button>
                         ) : (
-                          <Button variant="outline" className="w-full" data-testid={`plan-btn-${tier.slug}`} onClick={() => toast.info('Contact your administrator to change plans')}>
-                            {tier.sort_order > (usage?.tier?.sort_order || 0) ? 'Upgrade' : 'Switch'} to {tier.name}
+                          <Button
+                            variant={isUpgrade ? 'default' : 'outline'}
+                            className="w-full"
+                            data-testid={`plan-btn-${tier.slug}`}
+                            onClick={() => openUpgradeDialog(tier)}
+                          >
+                            {isUpgrade ? <ArrowUpCircle className="h-4 w-4 mr-2" /> : null}
+                            {isUpgrade ? 'Upgrade' : 'Switch'} to {tier.name}
                           </Button>
                         )}
                       </CardContent>
@@ -194,9 +284,122 @@ const Subscription = () => {
                 })}
               </div>
             </div>
+
+            <Separator className="my-8" />
+
+            {/* Billing History */}
+            <div>
+              <div className="flex items-center gap-2 mb-5">
+                <FileText className="h-5 w-5 text-primary" />
+                <h2 className="text-xl font-semibold font-heading">Billing History</h2>
+              </div>
+
+              {invoices.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 flex flex-col items-center gap-3 text-center">
+                    <FileText className="h-10 w-10 text-muted-foreground/40" />
+                    <p className="text-muted-foreground font-medium">No invoices yet</p>
+                    <p className="text-sm text-muted-foreground">Your billing history will appear here once invoices are generated.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Invoice #</TableHead>
+                          <TableHead>Description</TableHead>
+                          <TableHead>Period</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {invoices.map((inv) => (
+                          <TableRow key={inv.id}>
+                            <TableCell className="font-mono text-xs font-semibold">
+                              #{inv.id.slice(0, 8).toUpperCase()}
+                            </TableCell>
+                            <TableCell className="max-w-[200px] truncate">{inv.description}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                              {formatDate(inv.period_start)} – {formatDate(inv.period_end)}
+                            </TableCell>
+                            <TableCell className="font-semibold whitespace-nowrap">
+                              {formatCurrency(inv.amount, inv.currency)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={STATUS_STYLES[inv.status] || STATUS_STYLES.pending}>
+                                {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                              {formatDate(inv.created_at)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDownloadInvoice(inv)}
+                                className="gap-1.5"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                                Download
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </>
         )}
       </div>
+
+      {/* Upgrade / Plan Change Dialog */}
+      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-primary" />
+              Request Plan Change
+            </DialogTitle>
+            <DialogDescription>
+              {selectedTier && (
+                <>
+                  You're requesting to switch to the <strong>{selectedTier.name}</strong> plan.
+                  Your administrator will be notified and will reach out to process the change.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTier && (
+            <div className={`rounded-lg border p-4 bg-gradient-to-b ${(TIER_STYLES[selectedTier.slug] || TIER_STYLES.free).gradient}`}>
+              <p className="font-semibold mb-2">{selectedTier.name} plan includes:</p>
+              <ul className="space-y-1.5">
+                {(selectedTier.highlights || []).map((h, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    <Check className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+                    <span>{h}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUpgradeOpen(false)}>Cancel</Button>
+            <Button onClick={handleUpgradeRequest}>
+              <Mail className="h-4 w-4 mr-2" />
+              Send Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };
