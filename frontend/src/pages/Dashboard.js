@@ -16,7 +16,8 @@ import {
   Users,
   Building2,
   CheckCircle,
-  Key
+  Key,
+  Settings
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -24,6 +25,11 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const PIE_COLORS = ['#4F46E5', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
+
+const ALL_STAT_CARDS = [
+  'Total Assets', 'Assigned Assets', 'Available Assets', 'Open Tickets', 'Pending Orders',
+  'Total Tenants', 'Total Users'
+];
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -33,6 +39,19 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [demoStatus, setDemoStatus] = useState(null);
   const [clearingDemo, setClearingDemo] = useState(false);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const [hiddenWidgets, setHiddenWidgets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dashboard_hidden_widgets') || '[]'); }
+    catch { return []; }
+  });
+
+  const toggleWidget = (label) => {
+    setHiddenWidgets(prev => {
+      const next = prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label];
+      localStorage.setItem('dashboard_hidden_widgets', JSON.stringify(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetchStats();
@@ -128,13 +147,43 @@ const Dashboard = () => {
 
       <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="dashboard-page">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
-            Welcome back, {user?.name}
-          </h1>
-          <p className="text-base text-muted-foreground">
-            Here's an overview of your IT asset management system
-          </p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+              Welcome back, {user?.name}
+            </h1>
+            <p className="text-base text-muted-foreground">
+              Here's an overview of your IT asset management system
+            </p>
+          </div>
+          <div className="relative flex-shrink-0">
+            <button
+              onClick={() => setShowCustomize(p => !p)}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:border-primary hover:text-primary transition-colors"
+            >
+              <Settings className="h-4 w-4" />
+              Customize
+            </button>
+            {showCustomize && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowCustomize(false)} />
+                <div className="absolute right-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg p-3 z-20">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Show / Hide Widgets</p>
+                {ALL_STAT_CARDS.map(label => (
+                  <label key={label} className="flex items-center gap-2 px-1 py-1.5 rounded hover:bg-slate-50 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={!hiddenWidgets.includes(label)}
+                      onChange={() => toggleWidget(label)}
+                      className="accent-primary"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Stats Grid */}
@@ -150,7 +199,7 @@ const Dashboard = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {statCards.map((stat, index) => {
+            {statCards.filter(s => !hiddenWidgets.includes(s.label)).map((stat, index) => {
               const Icon = stat.icon;
               return (
                 <Card

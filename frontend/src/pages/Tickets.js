@@ -461,16 +461,28 @@ const Tickets = () => {
             </div>
             <div>
               <Label>Assign To</Label>
-              <Select value={updateData.assigned_to} onValueChange={(val) => setUpdateData({ ...updateData, assigned_to: val })}>
-                <SelectTrigger data-testid="update-assign-select">
-                  <SelectValue placeholder={Object.keys(users).length === 0 ? 'Loading users...' : 'Select user'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.values(users).map(u => (
-                    <SelectItem key={u.id} value={u.id}>{u.name} ({u.role?.replace('_', ' ')})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2 items-center mt-1">
+                <Select value={updateData.assigned_to} onValueChange={(val) => setUpdateData({ ...updateData, assigned_to: val })}>
+                  <SelectTrigger data-testid="update-assign-select" className="flex-1">
+                    <SelectValue placeholder="Select user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">— Unassigned —</SelectItem>
+                    {Object.values(users).map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.name} ({u.role?.replace('_', ' ')})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setUpdateData({ ...updateData, assigned_to: user?.id || '' })}
+                  title="Assign to me"
+                >
+                  Me
+                </Button>
+              </div>
             </div>
           </div>
           <DialogFooter>

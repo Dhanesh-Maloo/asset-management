@@ -39,13 +39,26 @@ const ActivityFeed = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filterAction, setFilterAction] = useState('');
+  const [filterResource, setFilterResource] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
 
-  useEffect(() => { fetchActivities(1, true); }, []);
+  useEffect(() => { fetchActivities(1, true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchActivities = async (p = 1, reset = false) => {
     if (reset) setLoading(true); else setRefreshing(true);
     try {
-      const res = await axios.get(`${API}/activity-feed?page=${p}&limit=30`);
+      const params = new URLSearchParams({ page: p, limit: 30 });
+      if (filterAction) params.set('action_type', filterAction);
+      if (filterResource) params.set('resource_type', filterResource);
+      if (filterDateFrom) params.set('date_from', new Date(filterDateFrom).toISOString());
+      if (filterDateTo) {
+        const to = new Date(filterDateTo);
+        to.setHours(23, 59, 59, 999);
+        params.set('date_to', to.toISOString());
+      }
+      const res = await axios.get(`${API}/activity-feed?${params.toString()}`);
       if (reset) {
         setActivities(res.data);
       } else {
@@ -61,9 +74,34 @@ const ActivityFeed = () => {
     }
   };
 
+  const applyFilter = (newAction, newResource, newFrom, newTo) => {
+    setFilterAction(newAction);
+    setFilterResource(newResource);
+    setFilterDateFrom(newFrom);
+    setFilterDateTo(newTo);
+    // Fetch with new values directly since setState is async
+    const params = new URLSearchParams({ page: 1, limit: 30 });
+    if (newAction) params.set('action_type', newAction);
+    if (newResource) params.set('resource_type', newResource);
+    if (newFrom) params.set('date_from', new Date(newFrom).toISOString());
+    if (newTo) {
+      const to = new Date(newTo); to.setHours(23, 59, 59, 999);
+      params.set('date_to', to.toISOString());
+    }
+    setLoading(true);
+    axios.get(`${API}/activity-feed?${params.toString()}`)
+      .then(res => { setActivities(res.data); setHasMore(res.data.length === 30); setPage(1); })
+      .catch(() => toast.error('Failed to load activity feed'))
+      .finally(() => setLoading(false));
+  };
+
+  const clearFilters = () => applyFilter('', '', '', '');
+
   const loadMore = () => { fetchActivities(page + 1, false); };
 
   const refresh = () => { fetchActivities(1, true); };
+
+  const hasActiveFilters = filterAction || filterResource || filterDateFrom || filterDateTo;
 
   // Group activities by date
   const grouped = activities.reduce((acc, act) => {
@@ -88,6 +126,62 @@ const ActivityFeed = () => {
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Refresh
           </button>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 mb-6 flex flex-wrap gap-3 items-end">
+          <div className="flex flex-col gap-1 min-w-[160px]">
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Action Type</label>
+            <select
+              value={filterAction}
+              onChange={e => applyFilter(e.target.value, filterResource, filterDateFrom, filterDateTo)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="">All Actions</option>
+              {['login','create','update','delete','assign','checkout','return','approve','reject','bulk_delete','bulk_update','change_password'].map(a => (
+                <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 min-w-[160px]">
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Resource Type</label>
+            <select
+              value={filterResource}
+              onChange={e => applyFilter(filterAction, e.target.value, filterDateFrom, filterDateTo)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="">All Resources</option>
+              {['asset','ticket','order','user','product','license','vendor'].map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">From Date</label>
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={e => applyFilter(filterAction, filterResource, e.target.value, filterDateTo)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">To Date</label>
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={e => applyFilter(filterAction, filterResource, filterDateFrom, e.target.value)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
 
         {loading ? (

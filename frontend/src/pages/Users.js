@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Users as UsersIcon, Plus, Trash2 } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -21,11 +21,17 @@ const Users = () => {
   const [users, setUsers] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [pendingInvites, setPendingInvites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
-  
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: '', role: 'employee' });
+  const [inviteResult, setInviteResult] = useState(null);
+  const [inviteSending, setInviteSending] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -44,13 +50,20 @@ const Users = () => {
     try {
       const usersRes = await axios.get(`${API}/users`);
       setUsers(usersRes.data);
-      
+
       const groupsRes = await axios.get(`${API}/groups`);
       setGroups(groupsRes.data);
-      
+
       if (user.role === 'super_admin') {
         const tenantsRes = await axios.get(`${API}/tenants`);
         setTenants(tenantsRes.data);
+      }
+
+      try {
+        const invitesRes = await axios.get(`${API}/auth/invites`);
+        setPendingInvites(invitesRes.data);
+      } catch {
+        // silently fail if endpoint not accessible
       }
     } catch (error) {
       console.error('Failed to fetch data', error);
@@ -71,6 +84,29 @@ const Users = () => {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create user');
     }
+  };
+
+  const handleInvite = async (e) => {
+    e.preventDefault();
+    setInviteSending(true);
+    try {
+      const res = await axios.post(`${API}/auth/invite`, inviteForm);
+      setInviteResult(res.data);
+      toast.success('Invitation created!');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to send invitation');
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  const copyInviteLink = () => {
+    if (!inviteResult?.invite_link) return;
+    navigator.clipboard.writeText(inviteResult.invite_link);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+    toast.success('Link copied to clipboard');
   };
 
   const openDeleteUser = (u) => {
@@ -120,10 +156,16 @@ const Users = () => {
               Manage user accounts and permissions
             </p>
           </div>
-          <Button onClick={() => setDialogOpen(true)} data-testid="create-user-btn">
-            <Plus className="h-4 w-4 mr-2" />
-            Add User
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setInviteForm({ email: '', role: 'employee' }); setInviteResult(null); setInviteDialogOpen(true); }}>
+              <Mail className="h-4 w-4 mr-2" />
+              Invite User
+            </Button>
+            <Button onClick={() => setDialogOpen(true)} data-testid="create-user-btn">
+              <Plus className="h-4 w-4 mr-2" />
+              Add User
+            </Button>
+          </div>
         </div>
 
         <Card>
@@ -191,7 +233,113 @@ const Users = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Pending Invitations */}
+        {pendingInvites.length > 0 && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Mail className="h-4 w-4 text-blue-500" />
+                Pending Invitations ({pendingInvites.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Expires At</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingInvites.map((inv) => (
+                      <TableRow key={inv.id}>
+                        <TableCell>{inv.email}</TableCell>
+                        <TableCell>{getRoleBadge(inv.role)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(inv.expires_at).toLocaleDateString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
+
+      {/* Invite User Dialog */}
+      <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) { setInviteResult(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Invite User</DialogTitle>
+            <DialogDescription>Send an email invitation to join the system</DialogDescription>
+          </DialogHeader>
+          {inviteResult ? (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm font-medium">
+                <Check className="h-4 w-4 flex-shrink-0" />
+                Invitation created successfully!
+              </div>
+              <div>
+                <Label className="mb-1 block text-sm">Invite Link (share this with the user)</Label>
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={inviteResult.invite_link}
+                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs bg-slate-50 font-mono truncate"
+                  />
+                  <Button size="sm" variant="outline" onClick={copyInviteLink}>
+                    {copiedLink ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">Link expires in 7 days</p>
+              </div>
+              <DialogFooter>
+                <Button onClick={() => { setInviteDialogOpen(false); setInviteResult(null); }}>Done</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <form onSubmit={handleInvite} className="space-y-4">
+              <div>
+                <Label htmlFor="invite-email">Email Address</Label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  placeholder="user@example.com"
+                  value={inviteForm.email}
+                  onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="invite-role">Role</Label>
+                <Select value={inviteForm.role} onValueChange={(val) => setInviteForm({ ...inviteForm, role: val })}>
+                  <SelectTrigger id="invite-role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employee">Employee</SelectItem>
+                    <SelectItem value="helpdesk_agent">Helpdesk Agent</SelectItem>
+                    <SelectItem value="asset_manager">Asset Manager</SelectItem>
+                    <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setInviteDialogOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={inviteSending}>
+                  <Mail className="h-4 w-4 mr-2" />
+                  {inviteSending ? 'Sending...' : 'Send Invite'}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Create User Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -284,6 +432,7 @@ const Users = () => {
           </form>
         </DialogContent>
       </Dialog>
+
       {/* Delete User Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent data-testid="delete-user-dialog">

@@ -30,6 +30,7 @@ import Vendors from './pages/Vendors';
 import Reports from './pages/Reports';
 import ActivityFeed from './pages/ActivityFeed';
 import Reservations from './pages/Reservations';
+import InviteAccept from './pages/InviteAccept';
 import './index.css';
 
 function AppRouter() {
@@ -47,6 +48,7 @@ function AppRouter() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/invite/:token" element={<InviteAccept />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
             
             <Route

@@ -403,6 +403,23 @@ class AssetAssign(BaseModel):
 class AssetUpdate(BaseModel):
     status: Optional[AssetStatus] = None
     location: Optional[str] = None
+    serial_number: Optional[str] = None
+    asset_tag: Optional[str] = None
+    purchase_date: Optional[str] = None
+    warranty_start_date: Optional[str] = None
+    warranty_end_date: Optional[str] = None
+    warranty_provider: Optional[str] = None
+    purchase_price: Optional[float] = None
+    depreciation_method: Optional[DepreciationMethod] = None
+    depreciation_rate: Optional[float] = None
+    salvage_value: Optional[float] = None
+    expiry_date: Optional[str] = None
+    department_id: Optional[str] = None
+    is_leased: Optional[bool] = None
+    lessor_name: Optional[str] = None
+    lease_start_date: Optional[str] = None
+    lease_end_date: Optional[str] = None
+    monthly_lease_payment: Optional[float] = None
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -623,6 +640,27 @@ class ApiKey(BaseModel):
 
 class ApiKeyCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
+
+class InviteToken(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    token: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    email: str
+    role: str = "employee"
+    tenant_id: Optional[str] = None
+    invited_by: str
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    expires_at: str = Field(default_factory=lambda: (datetime.now(timezone.utc) + timedelta(days=7)).isoformat())
+    accepted: bool = False
+
+class InviteCreate(BaseModel):
+    email: EmailStr
+    role: str = "employee"
+    tenant_id: Optional[str] = None
+
+class InviteAccept(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    password: str = Field(..., min_length=12)
 
 class TicketComment(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1054,6 +1092,28 @@ async def run_scheduled_alerts():
                 webhook = tenant_slack.get(tid, "")
                 if webhook:
                     await send_slack_notification(webhook, f"🔧 {len(items)} overdue maintenance tasks", items)
+
+            # ── Weekly summary report (every Monday) ───────────────────────
+            if now.weekday() == 0:  # Monday
+                all_tenants = await db.tenants.find({"status": {"$ne": "inactive"}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+                for tenant in all_tenants:
+                    tid = tenant["id"]
+                    t_assets = await db.assets.count_documents({"tenant_id": tid, "is_deleted": {"$ne": True}})
+                    t_open_tickets = await db.tickets.count_documents({"tenant_id": tid, "status": {"$in": ["open", "in_progress"]}})
+                    t_pending_orders = await db.orders.count_documents({"tenant_id": tid, "status": {"$in": ["pending", "approved"]}})
+                    summary_lines = [
+                        f"Total assets: {t_assets}",
+                        f"Open / In-progress tickets: {t_open_tickets}",
+                        f"Pending orders: {t_pending_orders}",
+                    ]
+                    recipients = tenant_admins.get(tid, [])
+                    for admin in recipients:
+                        await send_alert_email(
+                            admin["email"],
+                            f"📊 Weekly Asset Management Summary — {tenant.get('name', tid)}",
+                            summary_lines,
+                            intro=f"Here is your weekly summary for the week ending {now.strftime('%Y-%m-%d')}:"
+                        )
 
             logging.info("Scheduled alert checks complete.")
         except Exception as e:
@@ -1928,6 +1988,7 @@ async def get_assets(
     status: Optional[str] = Query(None, description="Filter by status"),
     search: Optional[str] = Query(None, description="Search by name or serial number"),
     is_demo: Optional[bool] = Query(None, description="Filter demo assets"),
+    department_id: Optional[str] = Query(None, description="Filter by department"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Results per page")
 ):
@@ -1945,6 +2006,8 @@ async def get_assets(
         query["status"] = status
     if is_demo is not None:
         query["is_demo"] = is_demo
+    if department_id:
+        query["department_id"] = department_id
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -3815,11 +3878,29 @@ async def report_asset_depreciation(current_user: User = Depends(get_current_use
 async def get_activity_feed(
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
+    action_type: Optional[str] = Query(None, description="Filter by action type"),
+    resource_type: Optional[str] = Query(None, description="Filter by resource type"),
+    date_from: Optional[str] = Query(None, description="Filter from date (ISO)"),
+    date_to: Optional[str] = Query(None, description="Filter to date (ISO)"),
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
     current_user: User = Depends(get_current_user_hybrid)
 ):
     skip = (page - 1) * limit
-    # audit_log doesn't store tenant_id; all records visible to admins
-    activities = await db.audit_log.find({}, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
+    query: dict = {}
+    if action_type:
+        query["action"] = action_type
+    if resource_type:
+        query["resource"] = resource_type
+    if user_id:
+        query["user_id"] = user_id
+    if date_from or date_to:
+        ts_filter: dict = {}
+        if date_from:
+            ts_filter["$gte"] = date_from
+        if date_to:
+            ts_filter["$lte"] = date_to
+        query["timestamp"] = ts_filter
+    activities = await db.audit_log.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
     return activities
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4436,6 +4517,211 @@ async def delete_demo_data(current_user: User = Depends(get_current_user_hybrid)
     return {"message": "Demo data cleared successfully", "items_deleted": deleted_count}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# BULK ASSET IMPORT (CSV / Excel)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.post("/assets/import")
+async def import_assets(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tenant_id = current_user.tenant_id or "default"
+    content = await file.read()
+    rows = []
+    filename = (file.filename or "").lower()
+    try:
+        if filename.endswith(".csv"):
+            import io, csv as csv_module
+            text = content.decode("utf-8-sig", errors="replace")
+            reader = csv_module.DictReader(io.StringIO(text))
+            rows = list(reader)
+        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+            import io, openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+            ws = wb.active
+            headers = None
+            for row in ws.iter_rows(values_only=True):
+                if headers is None:
+                    headers = [str(h).strip() if h is not None else "" for h in row]
+                    continue
+                rows.append(dict(zip(headers, [str(c).strip() if c is not None else "" for c in row])))
+        else:
+            raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
+
+    # Pre-load products for name lookup
+    products_list = await db.products.find({"tenant_id": tenant_id}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    product_map = {p["name"].lower(): p["id"] for p in products_list}
+
+    created, skipped = 0, []
+    for i, row in enumerate(rows, start=2):
+        asset_tag = str(row.get("asset_tag") or row.get("Asset Tag") or "").strip()
+        serial_number = str(row.get("serial_number") or row.get("Serial Number") or "").strip()
+        if not asset_tag or not serial_number:
+            skipped.append(f"Row {i}: missing asset_tag or serial_number")
+            continue
+        # Resolve product_id from name or direct ID
+        product_id = str(row.get("product_id") or row.get("Product ID") or "").strip()
+        if not product_id:
+            pname = str(row.get("product_name") or row.get("Product Name") or "").strip().lower()
+            product_id = product_map.get(pname, "")
+        if not product_id:
+            skipped.append(f"Row {i}: product not found (set product_id or product_name)")
+            continue
+        # Check duplicate serial
+        existing = await db.assets.find_one({"serial_number": serial_number, "tenant_id": tenant_id})
+        if existing:
+            skipped.append(f"Row {i}: serial {serial_number} already exists")
+            continue
+        def _float(v):
+            try: return float(v)
+            except: return 0.0
+        asset = Asset(
+            asset_tag=asset_tag,
+            product_id=product_id,
+            serial_number=serial_number,
+            tenant_id=tenant_id,
+            location=str(row.get("location") or row.get("Location") or "").strip(),
+            purchase_date=str(row.get("purchase_date") or row.get("Purchase Date") or "").strip() or None,
+            warranty_start_date=str(row.get("warranty_start_date") or "").strip() or None,
+            warranty_end_date=str(row.get("warranty_end_date") or row.get("Warranty End Date") or "").strip() or None,
+            warranty_provider=str(row.get("warranty_provider") or row.get("Warranty Provider") or "").strip(),
+            purchase_price=_float(row.get("purchase_price") or row.get("Purchase Price") or 0),
+            department_id=str(row.get("department_id") or "").strip() or None,
+        )
+        await db.assets.insert_one(asset.model_dump())
+        created += 1
+
+    return {"created": created, "skipped": len(skipped), "errors": skipped}
+
+
+@api_router.get("/assets/import/template")
+async def download_import_template(current_user: User = Depends(get_current_user)):
+    """Return a CSV template for bulk asset import."""
+    import io, csv as csv_module
+    output = io.StringIO()
+    writer = csv_module.writer(output)
+    writer.writerow(["asset_tag", "serial_number", "product_name", "location", "purchase_date",
+                     "warranty_end_date", "warranty_provider", "purchase_price"])
+    writer.writerow(["AST-001", "SN-123456", "Dell Laptop", "Head Office", "2024-01-15",
+                     "2027-01-15", "Dell Inc", "75000"])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=asset_import_template.csv"}
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# USER INVITATION SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.post("/auth/invite")
+async def create_invite(invite_data: InviteCreate, current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    # For non-super-admin, force their own tenant
+    tenant_id = invite_data.tenant_id if current_user.role == UserRole.SUPER_ADMIN else current_user.tenant_id
+    # Check if user with this email already exists
+    existing_user = await db.users.find_one({"email": invite_data.email.lower()})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="A user with this email already exists")
+    # Invalidate any existing pending invites for this email
+    await db.invite_tokens.delete_many({"email": invite_data.email.lower(), "accepted": False})
+    invite = InviteToken(
+        email=invite_data.email.lower(),
+        role=invite_data.role,
+        tenant_id=tenant_id,
+        invited_by=current_user.id
+    )
+    await db.invite_tokens.insert_one(invite.model_dump())
+    # Send invite email
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    invite_link = f"{frontend_url}/invite/{invite.token}"
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    if smtp_host:
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "You're invited to join the Asset Management System"
+            msg["From"] = os.environ.get("SMTP_FROM", "noreply@assetmanagement.com")
+            msg["To"] = invite.email
+            html_body = f"""
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+              <h2 style="color:#4F46E5">You're Invited!</h2>
+              <p>{current_user.name} has invited you to join as <strong>{invite_data.role.replace('_',' ').title()}</strong>.</p>
+              <p style="margin:24px 0">
+                <a href="{invite_link}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Accept Invitation</a>
+              </p>
+              <p style="color:#888;font-size:12px">This link expires in 7 days. If you did not expect this invite, please ignore this email.</p>
+            </div>"""
+            msg.attach(MIMEText(html_body, "html"))
+            smtp_port = int(os.environ.get("SMTP_PORT", 587))
+            smtp_user = os.environ.get("SMTP_USER", "")
+            smtp_pass = os.environ.get("SMTP_PASS", "")
+            server = smtplib.SMTP(smtp_host, smtp_port)
+            server.starttls()
+            if smtp_user:
+                server.login(smtp_user, smtp_pass)
+            server.sendmail(msg["From"], [invite.email], msg.as_string())
+            server.quit()
+        except Exception as e:
+            logging.warning(f"Failed to send invite email: {e}")
+    return {"message": "Invitation created", "token": invite.token, "invite_link": invite_link}
+
+
+@api_router.get("/auth/invite/{token}")
+async def get_invite(token: str):
+    invite = await db.invite_tokens.find_one({"token": token, "accepted": False}, {"_id": 0})
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found or already used")
+    if datetime.fromisoformat(invite["expires_at"]) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="Invite link has expired")
+    return {"email": invite["email"], "role": invite["role"], "tenant_id": invite.get("tenant_id")}
+
+
+@api_router.post("/auth/invite/{token}/accept")
+async def accept_invite(token: str, accept_data: InviteAccept):
+    invite = await db.invite_tokens.find_one({"token": token, "accepted": False}, {"_id": 0})
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found or already used")
+    if datetime.fromisoformat(invite["expires_at"]) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="Invite link has expired")
+    validate_password_strength(accept_data.password)
+    # Check email not already taken (race condition guard)
+    if await db.users.find_one({"email": invite["email"]}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    hashed = pwd_context.hash(accept_data.password)
+    user = User(
+        email=invite["email"],
+        name=accept_data.name,
+        hashed_password=hashed,
+        role=invite["role"],
+        tenant_id=invite.get("tenant_id"),
+        status="active"
+    )
+    await db.users.insert_one(user.model_dump())
+    await db.invite_tokens.update_one({"token": token}, {"$set": {"accepted": True}})
+    return {"message": "Account created successfully. You can now log in."}
+
+
+@api_router.get("/auth/invites")
+async def list_invites(current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query: dict = {"accepted": False}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+    invites = await db.invite_tokens.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return invites
+
+
 # Include router
 app.include_router(api_router)
 
@@ -4490,6 +4776,8 @@ async def startup_db_client():
     await db.amc_contracts.create_index("asset_id", background=True)
     await db.amc_contracts.create_index("tenant_id", background=True)
     await db.demo_data_registry.create_index("tenant_id", background=True)
+    await db.invite_tokens.create_index("token", background=True)
+    await db.invite_tokens.create_index("email", background=True)
     await seed_default_tiers()
     asyncio.create_task(run_scheduled_alerts())
     logger.info("Database indexes created, default tiers seeded, and alert scheduler started.")

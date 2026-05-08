@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle } from 'lucide-react';
+import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -43,10 +43,26 @@ const Assets = () => {
   });
   const [serialExists, setSerialExists] = useState(null); // null | {exists, asset_tag}
 
+  // Edit Asset state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [departments, setDepartments] = useState([]);
+
+  // Department filter
+  const [departmentFilter, setDepartmentFilter] = useState('');
+
+  // Import state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+
   useEffect(() => {
     fetchData();
+    fetchDepartments();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, statusFilter, demoFilter]);
+  }, [searchTerm, statusFilter, demoFilter, departmentFilter]);
 
   const fetchData = async () => {
     try {
@@ -55,6 +71,7 @@ const Assets = () => {
       if (statusFilter) params.status = statusFilter;
       if (demoFilter === 'demo') params.is_demo = true;
       if (demoFilter === 'regular') params.is_demo = false;
+      if (departmentFilter) params.department_id = departmentFilter;
       const [assetsRes, productsRes] = await Promise.all([
         axios.get(`${API}/assets`, { params }),
         axios.get(`${API}/products`)
@@ -157,6 +174,84 @@ const Assets = () => {
     } catch (error) {
       toast.error('Failed to export Excel');
     }
+  };
+
+  const fetchDepartments = async () => {
+    try {
+      const res = await axios.get(`${API}/departments`);
+      setDepartments(res.data);
+    } catch { /* silently fail */ }
+  };
+
+  const openEditDialog = (asset) => {
+    setEditingAsset(asset);
+    setEditForm({
+      asset_tag: asset.asset_tag || '',
+      serial_number: asset.serial_number || '',
+      status: asset.status || 'available',
+      location: asset.location || '',
+      department_id: asset.department_id || '',
+      purchase_date: asset.purchase_date ? asset.purchase_date.slice(0, 10) : '',
+      warranty_start_date: asset.warranty_start_date ? asset.warranty_start_date.slice(0, 10) : '',
+      warranty_end_date: asset.warranty_end_date ? asset.warranty_end_date.slice(0, 10) : '',
+      warranty_provider: asset.warranty_provider || '',
+      purchase_price: asset.purchase_price || 0,
+      depreciation_method: asset.depreciation_method || 'straight_line',
+      depreciation_rate: asset.depreciation_rate ?? 20,
+      salvage_value: asset.salvage_value || 0,
+      expiry_date: asset.expiry_date ? asset.expiry_date.slice(0, 10) : '',
+      is_leased: asset.is_leased || false,
+      lessor_name: asset.lessor_name || '',
+      lease_start_date: asset.lease_start_date ? asset.lease_start_date.slice(0, 10) : '',
+      lease_end_date: asset.lease_end_date ? asset.lease_end_date.slice(0, 10) : '',
+      monthly_lease_payment: asset.monthly_lease_payment || 0,
+    });
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    try {
+      const payload = {};
+      Object.entries(editForm).forEach(([k, v]) => {
+        if (v !== '' && v !== null && v !== undefined) payload[k] = v;
+      });
+      await axios.patch(`${API}/assets/${editingAsset.id}`, payload);
+      toast.success('Asset updated successfully');
+      setEditDialogOpen(false);
+      setEditingAsset(null);
+      fetchData();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to update asset');
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importFile) { toast.error('Please select a file'); return; }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      const res = await axios.post(`${API}/assets/import`, formData);
+      const { created, skipped, errors } = res.data;
+      setImportResult({ created, skipped, errors });
+      toast.success(`${created} asset(s) imported`);
+      fetchData();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const response = await axios.get(`${API}/assets/import/template`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = 'asset_import_template.csv'; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Failed to download template'); }
   };
 
   // Feature 10: Batch Label Printing
@@ -285,7 +380,7 @@ const Assets = () => {
               Track and manage IT assets lifecycle
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {canManage && (
               <Button variant="outline" onClick={handleExportCSV}>
                 <Download className="h-4 w-4 mr-2" />
@@ -296,6 +391,12 @@ const Assets = () => {
               <Button variant="outline" onClick={handleExportExcel}>
                 <FileSpreadsheet className="h-4 w-4 mr-2" />
                 Excel
+              </Button>
+            )}
+            {canManage && (
+              <Button variant="outline" onClick={() => { setImportResult(null); setImportFile(null); setImportDialogOpen(true); }}>
+                <Upload className="h-4 w-4 mr-2" />
+                Import
               </Button>
             )}
             {canManage && (
@@ -362,6 +463,19 @@ const Assets = () => {
                     <SelectItem value="regular">Regular Assets</SelectItem>
                   </SelectContent>
                 </Select>
+                {departments.length > 0 && (
+                  <Select value={departmentFilter || "all"} onValueChange={v => setDepartmentFilter(v === "all" ? "" : v)}>
+                    <SelectTrigger className="w-44 h-9">
+                      <SelectValue placeholder="All Departments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Departments</SelectItem>
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
           </CardHeader>
@@ -470,6 +584,14 @@ const Assets = () => {
                                 data-testid={`status-btn-${asset.id}`}
                               >
                                 Update Status
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openEditDialog(asset)}
+                                title="Edit asset"
+                              >
+                                <Pencil className="h-4 w-4" />
                               </Button>
                               <Button
                                 size="sm"
@@ -729,6 +851,188 @@ const Assets = () => {
             <Button variant="outline" onClick={() => setBulkEditOpen(false)}>Cancel</Button>
             <Button onClick={handleBulkUpdate} disabled={bulkSaving}>
               {bulkSaving ? 'Saving...' : 'Apply to All Selected'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Edit Asset Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Asset — {editingAsset?.asset_tag}</DialogTitle>
+            <DialogDescription>Update any field for this asset</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Asset Tag</Label>
+                <Input value={editForm.asset_tag || ''} onChange={e => setEditForm({ ...editForm, asset_tag: e.target.value })} />
+              </div>
+              <div>
+                <Label>Serial Number</Label>
+                <Input value={editForm.serial_number || ''} onChange={e => setEditForm({ ...editForm, serial_number: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Status</Label>
+                <Select value={editForm.status || 'available'} onValueChange={v => setEditForm({ ...editForm, status: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="available">Available</SelectItem>
+                    <SelectItem value="assigned">Assigned</SelectItem>
+                    <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
+                    <SelectItem value="retired">Retired</SelectItem>
+                    <SelectItem value="disposed">Disposed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Location</Label>
+                <Input value={editForm.location || ''} onChange={e => setEditForm({ ...editForm, location: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <Label>Department</Label>
+              <Select value={editForm.department_id || 'none'} onValueChange={v => setEditForm({ ...editForm, department_id: v === 'none' ? '' : v })}>
+                <SelectTrigger><SelectValue placeholder="No department" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No department</SelectItem>
+                  {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Purchase Date</Label>
+                <Input type="date" value={editForm.purchase_date || ''} onChange={e => setEditForm({ ...editForm, purchase_date: e.target.value })} />
+              </div>
+              <div>
+                <Label>Warranty Start</Label>
+                <Input type="date" value={editForm.warranty_start_date || ''} onChange={e => setEditForm({ ...editForm, warranty_start_date: e.target.value })} />
+              </div>
+              <div>
+                <Label>Warranty End</Label>
+                <Input type="date" value={editForm.warranty_end_date || ''} onChange={e => setEditForm({ ...editForm, warranty_end_date: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Warranty Provider</Label>
+                <Input value={editForm.warranty_provider || ''} onChange={e => setEditForm({ ...editForm, warranty_provider: e.target.value })} />
+              </div>
+              <div>
+                <Label>Purchase Price (₹)</Label>
+                <Input type="number" min="0" value={editForm.purchase_price || 0} onChange={e => setEditForm({ ...editForm, purchase_price: parseFloat(e.target.value) || 0 })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Depreciation Method</Label>
+                <Select value={editForm.depreciation_method || 'straight_line'} onValueChange={v => setEditForm({ ...editForm, depreciation_method: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="straight_line">Straight Line</SelectItem>
+                    <SelectItem value="declining_balance">Declining Balance</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Depreciation Rate (%)</Label>
+                <Input type="number" min="0" max="100" value={editForm.depreciation_rate ?? 20} onChange={e => setEditForm({ ...editForm, depreciation_rate: parseFloat(e.target.value) || 0 })} />
+              </div>
+              <div>
+                <Label>Salvage Value (₹)</Label>
+                <Input type="number" min="0" value={editForm.salvage_value || 0} onChange={e => setEditForm({ ...editForm, salvage_value: parseFloat(e.target.value) || 0 })} />
+              </div>
+            </div>
+            <div>
+              <Label>Expiry Date</Label>
+              <Input type="date" value={editForm.expiry_date || ''} onChange={e => setEditForm({ ...editForm, expiry_date: e.target.value })} className="w-48" />
+            </div>
+            <div>
+              <Label>Ownership Type</Label>
+              <Select value={editForm.is_leased ? 'leased' : 'owned'} onValueChange={v => setEditForm({ ...editForm, is_leased: v === 'leased' })}>
+                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="owned">Owned</SelectItem>
+                  <SelectItem value="leased">Leased</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editForm.is_leased && (
+              <div className="space-y-3 p-3 border border-blue-200 rounded-lg bg-blue-50">
+                <p className="text-xs font-semibold text-blue-700">Lease Details</p>
+                <div>
+                  <Label>Lessor Name</Label>
+                  <Input value={editForm.lessor_name || ''} onChange={e => setEditForm({ ...editForm, lessor_name: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <Label>Lease Start</Label>
+                    <Input type="date" value={editForm.lease_start_date || ''} onChange={e => setEditForm({ ...editForm, lease_start_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label>Lease End</Label>
+                    <Input type="date" value={editForm.lease_end_date || ''} onChange={e => setEditForm({ ...editForm, lease_end_date: e.target.value })} />
+                  </div>
+                  <div>
+                    <Label>Monthly Payment (₹)</Label>
+                    <Input type="number" min="0" value={editForm.monthly_lease_payment || 0} onChange={e => setEditForm({ ...editForm, monthly_lease_payment: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleEditSave}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Assets Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Import Assets</DialogTitle>
+            <DialogDescription>Upload a CSV or Excel file to bulk-import assets</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <button onClick={downloadTemplate} className="text-sm text-primary underline hover:no-underline">
+              Download CSV Template
+            </button>
+            <div>
+              <Label>Select File (.csv or .xlsx)</Label>
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="mt-1 block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-white hover:file:bg-primary/90"
+                onChange={e => { setImportFile(e.target.files[0] || null); setImportResult(null); }}
+              />
+            </div>
+            {importResult && (
+              <div className={`p-3 rounded-lg text-sm ${importResult.created > 0 ? 'bg-green-50 border border-green-200' : 'bg-slate-50 border border-slate-200'}`}>
+                <p className="font-semibold text-green-700">{importResult.created} asset(s) imported successfully</p>
+                {importResult.skipped > 0 && (
+                  <p className="text-slate-600 mt-1">{importResult.skipped} row(s) skipped</p>
+                )}
+                {importResult.errors?.length > 0 && (
+                  <ul className="mt-2 space-y-0.5">
+                    {importResult.errors.slice(0, 5).map((e, i) => (
+                      <li key={i} className="text-xs text-red-600">{e}</li>
+                    ))}
+                    {importResult.errors.length > 5 && <li className="text-xs text-slate-500">...and {importResult.errors.length - 5} more</li>}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>Close</Button>
+            <Button onClick={handleImport} disabled={importing || !importFile}>
+              {importing ? 'Importing...' : 'Import'}
             </Button>
           </DialogFooter>
         </DialogContent>
