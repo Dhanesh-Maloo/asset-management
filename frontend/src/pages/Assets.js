@@ -23,6 +23,7 @@ const Assets = () => {
   const [assets, setAssets] = useState([]);
   const [products, setProducts] = useState({});
   const [users, setUsers] = useState([]);
+  const [tenants, setTenants] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [assignUserId, setAssignUserId] = useState('');
@@ -76,19 +77,30 @@ const Assets = () => {
         axios.get(`${API}/assets`, { params }),
         axios.get(`${API}/products`)
       ]);
-      
+
       setAssets(assetsRes.data);
-      
+
       const productsMap = {};
       productsRes.data.forEach(p => productsMap[p.id] = p);
       setProducts(productsMap);
-      
+
       if (user.role !== 'employee') {
         try {
           const usersRes = await axios.get(`${API}/users`);
           setUsers(usersRes.data);
         } catch {
           // Users endpoint may not be accessible for all roles
+        }
+      }
+
+      if (user.role === 'super_admin') {
+        try {
+          const tenantsRes = await axios.get(`${API}/tenants`);
+          const tenantsMap = {};
+          tenantsRes.data.forEach(t => { tenantsMap[t.id] = t; });
+          setTenants(tenantsMap);
+        } catch {
+          // Tenants endpoint only accessible to super_admin
         }
       }
     } catch (error) {
@@ -507,6 +519,7 @@ const Assets = () => {
                       <TableHead>Product</TableHead>
                       <TableHead>Serial Number</TableHead>
                       <TableHead>Status</TableHead>
+                      {user?.role === 'super_admin' && <TableHead>Tenant</TableHead>}
                       {canManage && <TableHead>Assigned To</TableHead>}
                       <TableHead>Location</TableHead>
                       <TableHead>Expiry Date</TableHead>
@@ -537,6 +550,13 @@ const Assets = () => {
                         </TableCell>
                         <TableCell className="font-mono text-sm">{asset.serial_number}</TableCell>
                         <TableCell>{getStatusBadge(asset.status)}</TableCell>
+                        {user?.role === 'super_admin' && (
+                          <TableCell className="text-sm">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                              {tenants[asset.tenant_id]?.name || 'Unknown'}
+                            </span>
+                          </TableCell>
+                        )}
                         {canManage && (
                           <TableCell>
                             {asset.assigned_to ? (
