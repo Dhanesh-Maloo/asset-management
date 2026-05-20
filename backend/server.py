@@ -4555,9 +4555,12 @@ async def import_assets(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
 
-    # Pre-load products for name lookup
-    products_list = await db.products.find({"tenant_id": tenant_id}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
-    product_map = {p["name"].lower(): p["id"] for p in products_list}
+    # Pre-load products for name lookup — super_admin sees all tenants' products
+    if current_user.role == UserRole.SUPER_ADMIN:
+        products_list = await db.products.find({"is_deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1, "tenant_id": 1}).to_list(5000)
+    else:
+        products_list = await db.products.find({"tenant_id": tenant_id, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1, "tenant_id": 1}).to_list(2000)
+    product_map = {p["name"].strip().lower(): p["id"] for p in products_list}
 
     created, skipped = 0, []
     for i, row in enumerate(rows, start=2):
@@ -4566,13 +4569,19 @@ async def import_assets(
         if not asset_tag or not serial_number:
             skipped.append(f"Row {i}: missing asset_tag or serial_number")
             continue
-        # Resolve product_id from name or direct ID
-        product_id = str(row.get("product_id") or row.get("Product ID") or "").strip()
+        # Resolve product_id — accept many common column name variations
+        product_id = str(
+            row.get("product_id") or row.get("Product ID") or row.get("ProductID") or ""
+        ).strip()
         if not product_id:
-            pname = str(row.get("product_name") or row.get("Product Name") or "").strip().lower()
+            pname = str(
+                row.get("product_name") or row.get("Product Name") or
+                row.get("product") or row.get("Product") or
+                row.get("ProductName") or ""
+            ).strip().lower()
             product_id = product_map.get(pname, "")
         if not product_id:
-            skipped.append(f"Row {i}: product not found (set product_id or product_name)")
+            skipped.append(f"Row {i}: product '{pname}' not found — check product_name matches your product catalog")
             continue
         # Check duplicate serial
         existing = await db.assets.find_one({"serial_number": serial_number, "tenant_id": tenant_id})
