@@ -51,6 +51,8 @@ const AssetDetail = () => {
   });
   
   const [returnNotes, setReturnNotes] = useState('');
+  const [returnCondition, setReturnCondition] = useState('good');
+  const [fineInfo, setFineInfo] = useState(null);
   
   const [maintenanceData, setMaintenanceData] = useState({
     title: '',
@@ -148,15 +150,22 @@ const AssetDetail = () => {
 
   const handleReturn = async () => {
     try {
-      await axios.post(`${API}/assets/${assetId}/return`, {
-        condition_notes: returnNotes
+      const res = await axios.post(`${API}/assets/${assetId}/return`, {
+        condition_notes: returnNotes,
+        return_condition: returnCondition,
+        daily_fine_rate: 0
       });
-      toast.success('Asset returned successfully');
-      setReturnDialogOpen(false);
-      setReturnNotes('');
-      fetchAssetDetails();
+      if (res.data.days_overdue > 0) {
+        setFineInfo({ days: res.data.days_overdue, fine: res.data.fine_amount });
+      } else {
+        toast.success('Asset returned successfully');
+        setReturnDialogOpen(false);
+        setReturnNotes('');
+        setReturnCondition('good');
+        fetchAssetDetails();
+      }
     } catch (error) {
-      toast.error('Failed to return asset');
+      toast.error(error.response?.data?.detail || 'Failed to return asset');
     }
   };
 
@@ -1185,27 +1194,60 @@ const AssetDetail = () => {
       </Dialog>
 
       {/* Return Dialog */}
-      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+      <Dialog open={returnDialogOpen} onOpenChange={(open) => { setReturnDialogOpen(open); if (!open) { setFineInfo(null); setReturnNotes(''); setReturnCondition('good'); } }}>
         <DialogContent data-testid="return-dialog">
           <DialogHeader>
             <DialogTitle>Return Asset</DialogTitle>
             <DialogDescription>Mark this asset as returned</DialogDescription>
           </DialogHeader>
-          <div>
-            <Label htmlFor="return_notes">Condition Notes</Label>
-            <Textarea
-              id="return_notes"
-              value={returnNotes}
-              onChange={(e) => setReturnNotes(e.target.value)}
-              placeholder="Note any damage or issues..."
-              rows={4}
-              data-testid="return-notes-input"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReturnDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleReturn} data-testid="confirm-return-btn">Return Asset</Button>
-          </DialogFooter>
+          {fineInfo ? (
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                <p className="text-red-700 font-semibold text-lg">Asset Returned Late</p>
+                <p className="text-red-600 mt-1">{fineInfo.days} day(s) overdue</p>
+                {fineInfo.fine > 0 && <p className="text-red-800 font-bold mt-2">Fine: ${fineInfo.fine.toFixed(2)}</p>}
+              </div>
+              <Button className="w-full" onClick={() => { setFineInfo(null); setReturnDialogOpen(false); setReturnNotes(''); setReturnCondition('good'); fetchAssetDetails(); }}>
+                Acknowledge & Close
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="return_condition">Asset Condition</Label>
+                <Select value={returnCondition} onValueChange={setReturnCondition}>
+                  <SelectTrigger id="return_condition">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="good">Good — No issues</SelectItem>
+                    <SelectItem value="fair">Fair — Minor wear</SelectItem>
+                    <SelectItem value="damaged">Damaged — Needs repair</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="return_notes">Condition Notes</Label>
+                <Textarea
+                  id="return_notes"
+                  value={returnNotes}
+                  onChange={(e) => setReturnNotes(e.target.value)}
+                  placeholder="Note any damage or issues..."
+                  rows={3}
+                  data-testid="return-notes-input"
+                />
+              </div>
+              {asset?.expected_return_date && new Date(asset.expected_return_date) < new Date() && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                  This asset is overdue — expected return was {new Date(asset.expected_return_date).toLocaleDateString()}.
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setReturnDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleReturn} data-testid="confirm-return-btn">Return Asset</Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

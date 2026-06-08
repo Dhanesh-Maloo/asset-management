@@ -512,6 +512,8 @@ class AssetCheckout(BaseModel):
 
 class AssetReturn(BaseModel):
     condition_notes: str = ""
+    return_condition: str = "good"  # good, fair, damaged
+    daily_fine_rate: float = 0.0   # fine per day for late returns
 
 # ── New Models ──────────────────────────────────────────────────────────────
 
@@ -1068,8 +1070,13 @@ async def run_scheduled_alerts():
                     await send_slack_notification(webhook, f"⚠️ {len(items)} warranties expiring soon", items)
 
             # ── Overdue maintenance alerts ──────────────────────────────────
+            # Mark overdue tasks in DB so UI shows correct badge
+            await db.maintenance_schedules.update_many(
+                {"scheduled_date": {"$lt": today}, "status": {"$in": ["scheduled", "in_progress"]}},
+                {"$set": {"status": "overdue"}}
+            )
             overdue = await db.maintenance_schedules.find(
-                {"scheduled_date": {"$lt": today}, "status": {"$ne": "completed"}},
+                {"scheduled_date": {"$lt": today}, "status": "overdue"},
                 {"_id": 0, "asset_id": 1, "title": 1, "scheduled_date": 1, "tenant_id": 1}
             ).to_list(500)
 
@@ -1945,16 +1952,34 @@ async def update_order(order_id: str, order_update: OrderUpdate, current_user: U
     if order_update.status in [OrderStatus.APPROVED, OrderStatus.REJECTED]:
         update_data["approved_by"] = current_user.id
         update_data["approval_date"] = datetime.now(timezone.utc).isoformat()
-    
-    await db.orders.update_one({"id": order_id}, {"$set": update_data})
-    
-    # Deduct stock when order is approved
+
+    # Atomically deduct stock before marking approved — prevents race condition
     if order_update.status == OrderStatus.APPROVED:
-        await db.products.update_one(
-            {"id": order["product_id"], "stock": {"$gte": order.get("quantity", 1)}},
-            {"$inc": {"stock": -order.get("quantity", 1)}}
+        qty = order.get("quantity", 1)
+        stock_result = await db.products.find_one_and_update(
+            {"id": order["product_id"], "stock": {"$gte": qty}},
+            {"$inc": {"stock": -qty}},
+            return_document=True
         )
-    
+        if stock_result is None:
+            raise HTTPException(status_code=409, detail="Insufficient stock — order cannot be approved")
+
+    await db.orders.update_one({"id": order_id}, {"$set": update_data})
+
+    # Notify order creator of approval/rejection
+    if order_update.status in [OrderStatus.APPROVED, OrderStatus.REJECTED]:
+        creator = await db.users.find_one({"id": order.get("user_id")}, {"_id": 0, "email": 1, "name": 1})
+        if creator and creator.get("email"):
+            product = await db.products.find_one({"id": order["product_id"]}, {"_id": 0, "name": 1})
+            product_name = product["name"] if product else "your item"
+            status_word = "approved ✅" if order_update.status == OrderStatus.APPROVED else "rejected ❌"
+            await send_alert_email(
+                creator["email"],
+                f"Order {status_word.upper()} — {product_name}",
+                [f"Your order for {order.get('quantity', 1)}x {product_name} has been {status_word} by {current_user.name}."],
+                "Here is an update on your order:"
+            )
+
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
 
@@ -2302,14 +2327,17 @@ async def get_approval_workflows(current_user: User = Depends(get_current_user))
 async def checker_approve_order(order_id: str, comments: str = "", current_user: User = Depends(get_current_user)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    # Check if workflow requires checker
-    workflow = await db.approval_workflows.find_one({"tenant_id": order["tenant_id"], "entity_type": "order"}, {"_id": 0})
-    
+
+    # Validate: order must be in pending stage before checker can act
+    if order.get("status") != OrderStatus.PENDING:
+        raise HTTPException(status_code=400, detail="Only pending orders can be checker-approved")
+    if order.get("approval_stage") == ApprovalStage.CHECKER:
+        raise HTTPException(status_code=400, detail="Order already has checker approval")
+
     update_data = {
         "approval_stage": ApprovalStage.CHECKER,
         "checker_approved_by": current_user.id,
@@ -2340,7 +2368,27 @@ async def approver_approve_order(order_id: str, comments: str = "", current_user
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+
+    # Validate stage: checker must have approved before approver can act
+    workflow = await db.approval_workflows.find_one(
+        {"tenant_id": order.get("tenant_id"), "entity_type": "order"}, {"_id": 0}
+    )
+    if workflow and workflow.get("requires_checker") and order.get("approval_stage") != ApprovalStage.CHECKER:
+        raise HTTPException(status_code=400, detail="Checker approval required before final approval")
+    if order.get("status") == OrderStatus.APPROVED:
+        raise HTTPException(status_code=400, detail="Order is already approved")
+    if order.get("status") == OrderStatus.REJECTED:
+        raise HTTPException(status_code=400, detail="Cannot approve a rejected order")
+
+    qty = order.get("quantity", 1)
+    stock_result = await db.products.find_one_and_update(
+        {"id": order["product_id"], "stock": {"$gte": qty}},
+        {"$inc": {"stock": -qty}},
+        return_document=True
+    )
+    if stock_result is None:
+        raise HTTPException(status_code=409, detail="Insufficient stock — order cannot be approved")
+
     update_data = {
         "status": OrderStatus.APPROVED,
         "approval_stage": ApprovalStage.APPROVER,
@@ -2349,16 +2397,8 @@ async def approver_approve_order(order_id: str, comments: str = "", current_user
         "approved_by": current_user.id,
         "approval_date": datetime.now(timezone.utc).isoformat()
     }
-    
+
     await db.orders.update_one({"id": order_id}, {"$set": update_data})
-    
-    # Deduct stock from product on final approval
-    order_data = await db.orders.find_one({"id": order_id}, {"_id": 0})
-    if order_data:
-        await db.products.update_one(
-            {"id": order_data["product_id"], "stock": {"$gte": order_data.get("quantity", 1)}},
-            {"$inc": {"stock": -order_data.get("quantity", 1)}}
-        )
     
     # Log approval history
     history = ApprovalHistory(
@@ -2500,23 +2540,47 @@ async def return_asset(asset_id: str, return_data: AssetReturn, current_user: Us
     if asset["status"] != AssetStatus.CHECKED_OUT:
         raise HTTPException(status_code=400, detail="Asset is not checked out")
     
+    now_dt = datetime.now(timezone.utc)
+    fine_amount = 0.0
+    days_overdue = 0
+    expected_return = asset.get("expected_return_date")
+    if expected_return:
+        try:
+            due_dt = datetime.fromisoformat(expected_return.replace("Z", "+00:00"))
+            if now_dt > due_dt:
+                days_overdue = (now_dt - due_dt).days
+                fine_amount = round(days_overdue * return_data.daily_fine_rate, 2)
+        except Exception:
+            pass
+
     update_data = {
         "status": AssetStatus.AVAILABLE,
-        "actual_return_date": datetime.now(timezone.utc).isoformat()
+        "actual_return_date": now_dt.isoformat(),
+        "return_condition": return_data.return_condition,
+        "last_fine_amount": fine_amount,
+        "last_days_overdue": days_overdue,
     }
-    
+
     await db.assets.update_one({"id": asset_id}, {"$set": update_data})
-    
+
+    notes_parts = [return_data.condition_notes or "Asset returned"]
+    notes_parts.append(f"Condition: {return_data.return_condition}")
+    if days_overdue > 0:
+        notes_parts.append(f"Returned {days_overdue} day(s) late. Fine: ${fine_amount:.2f}")
+
     history = AssetHistory(
         asset_id=asset_id,
         action="returned",
         performed_by=current_user.id,
-        notes=return_data.condition_notes or "Asset returned"
+        notes=" | ".join(notes_parts)
     )
     await db.asset_history.insert_one(history.model_dump())
-    
+
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    return Asset(**updated_asset)
+    result = Asset(**updated_asset).model_dump()
+    result["days_overdue"] = days_overdue
+    result["fine_amount"] = fine_amount
+    return result
 
 # Asset depreciation calculation
 @api_router.get("/assets/{asset_id}/depreciation")
@@ -2923,16 +2987,11 @@ async def get_notifications(current_user: User = Depends(get_current_user)):
                 "link": "/assets"
             })
 
-    # Overdue maintenance
-    maint_query = {"status": "scheduled"}
+    # Overdue maintenance (correct collection)
+    maint_query = {"status": "overdue"}
     if tenant_id:
         maint_query["tenant_id"] = tenant_id
-    schedules = await db.maintenance.find(maint_query, {"_id": 0, "scheduled_date": 1}).to_list(1000)
-    now_date = datetime.now(timezone.utc).date().isoformat()
-    overdue = sum(
-        1 for s in schedules
-        if s.get("scheduled_date") and s["scheduled_date"][:10] < now_date
-    )
+    overdue = await db.maintenance_schedules.count_documents(maint_query)
     if overdue > 0:
         notifications.append({
             "type": "overdue_maintenance",
@@ -2998,11 +3057,11 @@ async def trigger_email_alerts(current_user: User = Depends(get_current_user)):
             )
         sent_count += len(admin_emails)
 
-    # Check overdue maintenance
-    maint_query = {"status": "scheduled"}
+    # Check overdue maintenance (use correct collection name)
+    maint_query = {"status": {"$in": ["scheduled", "overdue", "in_progress"]}}
     if tenant_id:
         maint_query["tenant_id"] = tenant_id
-    schedules = await db.maintenance.find(maint_query, {"_id": 0}).to_list(500)
+    schedules = await db.maintenance_schedules.find(maint_query, {"_id": 0}).to_list(500)
     now_date = now.date().isoformat()
     overdue_maint = [
         f"{s.get('title', 'Untitled')} — was due {s['scheduled_date'][:10]}"

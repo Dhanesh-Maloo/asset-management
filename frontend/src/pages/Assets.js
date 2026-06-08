@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { cachedGet } from '../lib/cache';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
@@ -190,7 +191,7 @@ const Assets = () => {
 
   const fetchDepartments = async () => {
     try {
-      const res = await axios.get(`${API}/departments`);
+      const res = await cachedGet(axios, `${API}/departments`, {}, 120000);
       setDepartments(res.data);
     } catch { /* silently fail */ }
   };
@@ -705,11 +706,11 @@ const Assets = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="asset-tag">Asset Tag *</Label>
-                <Input id="asset-tag" value={assetForm.asset_tag} onChange={(e) => setAssetForm({ ...assetForm, asset_tag: e.target.value })} placeholder="ASSET-001" required data-testid="asset-tag-input" />
+                <Input id="asset-tag" value={assetForm.asset_tag} onChange={(e) => setAssetForm({ ...assetForm, asset_tag: e.target.value })} placeholder="ASSET-001" required maxLength={100} data-testid="asset-tag-input" />
               </div>
               <div>
                 <Label htmlFor="serial-number">Serial Number *</Label>
-                <Input id="serial-number" value={assetForm.serial_number} onChange={(e) => { setAssetForm({ ...assetForm, serial_number: e.target.value }); checkSerialNumber(e.target.value); }} placeholder="SN-ABC123" required data-testid="asset-serial-input" className={serialExists?.exists ? 'border-orange-400' : ''} />
+                <Input id="serial-number" value={assetForm.serial_number} onChange={(e) => { setAssetForm({ ...assetForm, serial_number: e.target.value }); checkSerialNumber(e.target.value); }} placeholder="SN-ABC123" required maxLength={100} data-testid="asset-serial-input" className={serialExists?.exists ? 'border-orange-400' : ''} />
                 {serialExists?.exists && (
                   <p className="text-xs text-orange-600 flex items-center gap-1 mt-1">
                     <AlertTriangle className="h-3 w-3" /> Duplicate: already used by <strong>{serialExists.asset_tag}</strong>
@@ -733,7 +734,7 @@ const Assets = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="asset-location">Location</Label>
-                <Input id="asset-location" value={assetForm.location} onChange={(e) => setAssetForm({ ...assetForm, location: e.target.value })} placeholder="Office A, Floor 2" data-testid="asset-location-input" />
+                <Input id="asset-location" value={assetForm.location} onChange={(e) => setAssetForm({ ...assetForm, location: e.target.value })} placeholder="Office A, Floor 2" maxLength={200} data-testid="asset-location-input" />
               </div>
               <div>
                 <Label htmlFor="asset-price">Purchase Price</Label>

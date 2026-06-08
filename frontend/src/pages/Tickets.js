@@ -392,6 +392,7 @@ const Tickets = () => {
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 required
+                maxLength={200}
                 data-testid="ticket-title-input"
               />
             </div>
@@ -403,6 +404,7 @@ const Tickets = () => {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 required
                 rows={4}
+                maxLength={2000}
                 data-testid="ticket-description-input"
               />
             </div>

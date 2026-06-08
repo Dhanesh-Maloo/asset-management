@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
+import OnboardingModal from './OnboardingModal';
 import { Menu, Bell, Sun, Moon } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -161,6 +162,11 @@ const DashboardLayout = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Onboarding modal — shows once on first login */}
+      {user?.role && ['tenant_admin', 'asset_manager'].includes(user.role) && (
+        <OnboardingModal />
+      )}
     </div>
   );
 };

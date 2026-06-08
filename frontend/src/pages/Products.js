@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { cachedGet, cache } from '../lib/cache';
 import { useAuth } from '../contexts/AuthContext';
 import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -64,9 +65,10 @@ const Products = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, selectedCategory, products, sortBy]);
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (forceRefresh = false) => {
     try {
-      const res = await axios.get(`${API}/products`);
+      if (forceRefresh) cache.invalidate(`${API}/products{}`);
+      const res = await cachedGet(axios, `${API}/products`, {}, 60000);
       setProducts(res.data);
     } catch (error) {
       console.error('Failed to fetch products', error);
@@ -143,7 +145,7 @@ const Products = () => {
       toast.success('Product created successfully!');
       setDialogOpen(false);
       setFormData({ name: '', category: '', description: '', specs: {}, image_url: '', stock: 0, price: 0 });
-      fetchProducts();
+      fetchProducts(true);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create product');
     }
@@ -182,7 +184,7 @@ const Products = () => {
       toast.success('Product deleted successfully');
       setDeleteDialogOpen(false);
       setProductToDelete(null);
-      fetchProducts();
+      fetchProducts(true);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete product');
     }
@@ -401,11 +403,11 @@ const Products = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="name">Product Name *</Label>
-                <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="Dell Latitude 5420" required data-testid="product-name-input" />
+                <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="Dell Latitude 5420" required maxLength={200} data-testid="product-name-input" />
               </div>
               <div>
                 <Label htmlFor="category">Category *</Label>
-                <Input id="category" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder="Laptops" required data-testid="product-category-input" />
+                <Input id="category" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder="Laptops" required maxLength={100} data-testid="product-category-input" />
               </div>
             </div>
             <div>
@@ -424,7 +426,12 @@ const Products = () => {
               </div>
               <div>
                 <Label htmlFor="image_url">Image URL</Label>
-                <Input id="image_url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} placeholder="https://..." data-testid="product-image-input" />
+                <Input id="image_url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} placeholder="https://..." data-testid="product-image-input" maxLength={500} />
+                {formData.image_url && (
+                  <div className="mt-2 h-24 w-24 rounded border overflow-hidden bg-slate-100">
+                    <img src={formData.image_url} alt="Preview" className="h-full w-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
