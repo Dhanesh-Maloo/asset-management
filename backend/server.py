@@ -1503,8 +1503,24 @@ async def public_signup(
     admin_password: str,
     domain: str,
     subdomain: str = "",
-    currency: str = "USD"
+    currency: str = "USD",
+    seed_demo_data: bool = False,
 ):
+    # Input length validation
+    if not company_name or len(company_name.strip()) < 2 or len(company_name) > 100:
+        raise HTTPException(status_code=400, detail="Company name must be between 2 and 100 characters")
+    if not admin_name or len(admin_name.strip()) < 2 or len(admin_name) > 100:
+        raise HTTPException(status_code=400, detail="Name must be between 2 and 100 characters")
+    if not domain or len(domain) > 253 or not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,251}[a-zA-Z0-9]$', domain):
+        raise HTTPException(status_code=400, detail="Invalid domain format")
+    if subdomain and (len(subdomain) > 63 or not re.match(r'^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]?$', subdomain.lower())):
+        raise HTTPException(status_code=400, detail="Subdomain must be lowercase letters, numbers, and hyphens only (max 63 chars)")
+    if currency not in ("USD", "EUR", "GBP", "INR", "AED", "SGD", "AUD", "CAD"):
+        raise HTTPException(status_code=400, detail="Unsupported currency")
+
+    # Password strength
+    validate_password_strength(admin_password)
+
     # Check if email already exists
     existing_user = await db.users.find_one({"email": admin_email}, {"_id": 0})
     if existing_user:
@@ -1543,11 +1559,12 @@ async def public_signup(
     admin_doc["password_hash"] = hashed_password
     await db.users.insert_one(admin_doc)
     
-    # Seed demo data for new tenant so they can explore with sample data
-    try:
-        await seed_tenant_demo_data(tenant.id, admin_user.id)
-    except Exception as e:
-        logger.warning(f"Demo data seeding failed for tenant {tenant.id}: {e}")
+    # Seed demo data only if explicitly requested
+    if seed_demo_data:
+        try:
+            await seed_tenant_demo_data(tenant.id, admin_user.id)
+        except Exception as e:
+            logger.warning(f"Demo data seeding failed for tenant {tenant.id}: {e}")
 
     return {
         "message": "Signup successful! You can now login.",
@@ -1704,12 +1721,20 @@ async def delete_tenant(tenant_id: str, current_user: User = Depends(get_current
     await db.tenants.delete_one({"id": tenant_id})
     return {"message": f"Tenant '{tenant['name']}' and all related data deleted"}
 
-@api_router.get("/tenants/subdomain/{subdomain}", response_model=Tenant)
+@api_router.get("/tenants/subdomain/{subdomain}")
 async def get_tenant_by_subdomain(subdomain: str):
     tenant = await db.tenants.find_one({"subdomain": subdomain}, {"_id": 0})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    return Tenant(**tenant)
+    # Return only branding fields needed for the login page — never expose settings or internal IDs
+    return {
+        "name": tenant.get("name", ""),
+        "company_name": tenant.get("company_name", ""),
+        "logo_url": tenant.get("logo_url", ""),
+        "primary_color": tenant.get("primary_color", "#4F46E5"),
+        "secondary_color": tenant.get("secondary_color", "#F1F5F9"),
+        "subdomain": tenant.get("subdomain", ""),
+    }
 
 # Product endpoints
 @api_router.post("/products", response_model=Product)
@@ -4798,8 +4823,8 @@ _cors_origins = [o.strip() for o in _cors_origins_env.split(',') if o.strip()] i
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=False,
-    allow_origins=["*"],
+    allow_credentials=True,
+    allow_origins=_cors_origins,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Session-ID"],
 )

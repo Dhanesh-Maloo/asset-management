@@ -31,6 +31,7 @@ import Reports from './pages/Reports';
 import ActivityFeed from './pages/ActivityFeed';
 import Reservations from './pages/Reservations';
 import InviteAccept from './pages/InviteAccept';
+import NotFound from './pages/NotFound';
 import './index.css';
 
 function AppRouter() {
@@ -239,6 +240,8 @@ function AppRouter() {
                 </ProtectedRoute>
               }
             />
+
+            <Route path="*" element={<NotFound />} />
           </Routes>
       );
 }
