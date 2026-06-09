@@ -4819,11 +4819,19 @@ async def list_invites(current_user: User = Depends(get_current_user)):
 app.include_router(api_router)
 
 _cors_origins_env = os.environ.get('CORS_ORIGINS', '')
-_cors_origins = [o.strip() for o in _cors_origins_env.split(',') if o.strip()] if _cors_origins_env else [FRONTEND_URL]
+_frontend_url_env = os.environ.get('FRONTEND_URL', '')
+# Use explicit origins if env vars are set; fall back to wildcard so production
+# doesn't break if the env vars haven't been configured yet.
+if _cors_origins_env:
+    _cors_origins = [o.strip() for o in _cors_origins_env.split(',') if o.strip()]
+elif _frontend_url_env and not _frontend_url_env.startswith('http://localhost'):
+    _cors_origins = [_frontend_url_env]
+else:
+    _cors_origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_origins=_cors_origins,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Session-ID"],
