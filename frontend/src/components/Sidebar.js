@@ -113,7 +113,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
       {/* Sidebar */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
-        w-64 bg-sidebar text-sidebar-foreground
+        w-64 min-w-[16rem] shrink-0 bg-sidebar text-sidebar-foreground
         border-r border-sidebar-border
         transform transition-transform duration-200 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
