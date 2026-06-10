@@ -19,15 +19,15 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const MANAGER_ROLES = ['super_admin', 'tenant_admin', 'asset_manager'];
 
 const STATUS_BADGE = {
-  pending:   'bg-yellow-100 text-yellow-800 border-yellow-300',
-  approved:  'bg-green-100 text-green-800 border-green-300',
-  rejected:  'bg-red-100 text-red-800 border-red-300',
-  cancelled: 'bg-slate-100 text-slate-800 border-slate-300',
-  completed: 'bg-blue-100 text-blue-800 border-blue-300',
+  pending:   'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20',
+  approved:  'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20',
+  rejected:  'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20',
+  cancelled: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
+  completed: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20',
 };
 
 const StatusBadge = ({ status }) => (
-  <Badge className={STATUS_BADGE[status] || 'bg-slate-100 text-slate-800'}>
+  <Badge className={STATUS_BADGE[status] || 'bg-muted text-slate-800'}>
     {status.charAt(0).toUpperCase() + status.slice(1)}
   </Badge>
 );
@@ -139,14 +139,14 @@ const Reservations = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in">
         {/* Page Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Asset Reservations
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Reserve assets for upcoming needs and track their status
             </p>
           </div>
@@ -168,7 +168,7 @@ const Reservations = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-14 bg-slate-100 rounded animate-pulse" />
+                  <div key={i} className="h-14 shimmer rounded-md" />
                 ))}
               </div>
             ) : reservations.length === 0 ? (
@@ -229,7 +229,7 @@ const Reservations = () => {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="text-green-700 border-green-300 hover:bg-green-50"
+                                  className="text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
                                   onClick={() => handleStatusUpdate(reservation.id, 'approved')}
                                   title="Approve"
                                 >
@@ -239,7 +239,7 @@ const Reservations = () => {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="text-red-700 border-red-300 hover:bg-red-50"
+                                  className="text-red-700 dark:text-red-400 border-red-500/30 hover:bg-red-500/10"
                                   onClick={() => handleStatusUpdate(reservation.id, 'rejected')}
                                   title="Reject"
                                 >
@@ -254,7 +254,7 @@ const Reservations = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="text-slate-700 border-slate-300 hover:bg-slate-50"
+                                className="text-slate-700 border-slate-300 hover:bg-muted/50"
                                 onClick={() => handleStatusUpdate(reservation.id, 'cancelled')}
                                 title="Cancel reservation"
                               >
@@ -268,7 +268,7 @@ const Reservations = () => {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                                 onClick={() => handleDelete(reservation.id)}
                                 title="Delete reservation"
                               >

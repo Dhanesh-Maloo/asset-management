@@ -56,16 +56,19 @@ const InviteAccept = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+    <div className="min-h-screen bg-sidebar flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-primary/20 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+
+      <div className="relative w-full max-w-md bg-card border border-border rounded-xl shadow-2xl p-8 animate-fade-in">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
             <svg className="w-7 h-7 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Accept Invitation</h1>
-          <p className="text-slate-500 mt-1 text-sm">Create your account to get started</p>
+          <h1 className="text-2xl font-bold font-heading tracking-tight">Accept Invitation</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Create your account to get started</p>
         </div>
 
         {loadingInvite ? (
@@ -75,58 +78,58 @@ const InviteAccept = () => {
           </div>
         ) : loadError ? (
           <div className="text-center py-4">
-            <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6">
-              <p className="text-red-700 font-medium">{loadError}</p>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-5 mb-6">
+              <p className="text-destructive font-medium">{loadError}</p>
               <p className="text-red-500 text-sm mt-1">This link may have already been used or has expired.</p>
             </div>
             <button
               onClick={() => navigate('/login')}
-              className="w-full bg-primary text-white py-2.5 rounded-xl font-semibold hover:bg-primary/90 transition-colors"
+              className="w-full bg-primary text-white py-2.5 rounded-md font-semibold hover:bg-primary/90 transition-colors"
             >
               Go to Login
             </button>
           </div>
         ) : success ? (
           <div className="text-center py-4">
-            <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-5">
               <div className="text-3xl mb-2">✅</div>
-              <p className="text-green-700 font-semibold">Account created successfully!</p>
-              <p className="text-green-600 text-sm mt-1">Redirecting to login...</p>
+              <p className="text-emerald-700 dark:text-emerald-400 font-semibold">Account created successfully!</p>
+              <p className="text-emerald-600 dark:text-emerald-400 text-sm mt-1">Redirecting to login...</p>
             </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
+              <label className="block text-sm font-medium text-foreground mb-1">Email Address</label>
               <input
                 type="email"
                 value={invite?.email || ''}
                 disabled
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
+                className="w-full border border-border rounded-md px-4 py-2.5 text-sm bg-muted/50 text-muted-foreground cursor-not-allowed"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
+              <label className="block text-sm font-medium text-foreground mb-1">Role</label>
               <input
                 type="text"
                 value={(invite?.role || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                 disabled
-                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
+                className="w-full border border-border rounded-md px-4 py-2.5 text-sm bg-muted/50 text-muted-foreground cursor-not-allowed"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Full Name <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-foreground mb-1">Full Name <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 placeholder="Enter your full name"
                 value={form.name}
                 onChange={e => setForm({ ...form, name: e.target.value })}
                 required
-                className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                className="w-full border border-input rounded-md px-4 py-2.5 bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Password <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-foreground mb-1">Password <span className="text-red-500">*</span></label>
               <input
                 type="password"
                 placeholder="Minimum 12 characters"
@@ -134,23 +137,23 @@ const InviteAccept = () => {
                 onChange={e => setForm({ ...form, password: e.target.value })}
                 required
                 minLength={12}
-                className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                className="w-full border border-input rounded-md px-4 py-2.5 bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Confirm Password <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-foreground mb-1">Confirm Password <span className="text-red-500">*</span></label>
               <input
                 type="password"
                 placeholder="Re-enter your password"
                 value={form.confirmPassword}
                 onChange={e => setForm({ ...form, confirmPassword: e.target.value })}
                 required
-                className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                className="w-full border border-input rounded-md px-4 py-2.5 bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
               />
             </div>
 
             {submitError && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3 text-sm text-red-700">
                 {submitError}
               </div>
             )}
@@ -158,12 +161,12 @@ const InviteAccept = () => {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-primary text-white py-2.5 rounded-xl font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 mt-2"
+              className="w-full bg-primary text-white py-2.5 rounded-md font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 mt-2"
             >
               {submitting ? 'Creating Account...' : 'Create Account'}
             </button>
 
-            <p className="text-center text-xs text-slate-400 mt-2">
+            <p className="text-center text-xs text-muted-foreground mt-2">
               Already have an account?{' '}
               <button type="button" onClick={() => navigate('/login')} className="text-primary hover:underline font-medium">
                 Sign in

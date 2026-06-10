@@ -108,11 +108,11 @@ const Departments = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">Departments</h1>
-            <p className="text-base text-muted-foreground">Manage cost centers and group assets by department</p>
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">Departments</h1>
+            <p className="text-sm text-muted-foreground">Manage cost centers and group assets by department</p>
           </div>
           {canManage && (
             <Button onClick={() => { setForm(emptyForm); setCreateOpen(true); }}>
@@ -125,7 +125,7 @@ const Departments = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           <Card>
             <CardContent className="pt-6 flex items-center gap-4">
-              <div className="bg-indigo-100 p-3 rounded-lg"><Building2 className="h-6 w-6 text-indigo-600" /></div>
+              <div className="bg-indigo-500/10 p-3 rounded-md"><Building2 className="h-6 w-6 text-indigo-600" /></div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Departments</p>
                 <p className="text-2xl font-bold">{departments.length}</p>
@@ -134,7 +134,7 @@ const Departments = () => {
           </Card>
           <Card>
             <CardContent className="pt-6 flex items-center gap-4">
-              <div className="bg-blue-100 p-3 rounded-lg"><Laptop className="h-6 w-6 text-blue-600" /></div>
+              <div className="bg-blue-500/10 p-3 rounded-md"><Laptop className="h-6 w-6 text-blue-600" /></div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Assets Assigned</p>
                 <p className="text-2xl font-bold">{Object.values(stats).reduce((s, v) => s + (v.asset_count || 0), 0)}</p>
@@ -143,7 +143,7 @@ const Departments = () => {
           </Card>
           <Card>
             <CardContent className="pt-6 flex items-center gap-4">
-              <div className="bg-green-100 p-3 rounded-lg"><DollarSign className="h-6 w-6 text-green-600" /></div>
+              <div className="bg-emerald-500/10 p-3 rounded-md"><DollarSign className="h-6 w-6 text-emerald-600 dark:text-emerald-400" /></div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Asset Value</p>
                 <p className="text-2xl font-bold">${Object.values(stats).reduce((s, v) => s + (v.total_asset_value || 0), 0).toLocaleString()}</p>
@@ -157,7 +157,7 @@ const Departments = () => {
           <CardContent>
             {loading ? (
               <div className="space-y-3">
-                {[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-slate-100 rounded animate-pulse" />)}
+                {[...Array(3)].map((_, i) => <div key={i} className="h-16 shimmer rounded-md" />)}
               </div>
             ) : departments.length === 0 ? (
               <div className="text-center py-12">

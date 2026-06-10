@@ -141,7 +141,7 @@ const Licenses = () => {
       <div className="p-6 md:p-10 max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold font-heading">Software Licenses</h1>
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight">Software Licenses</h1>
             <p className="text-slate-500 mt-1">Track software licenses, seats, and expiry dates</p>
           </div>
           {canEdit && (
@@ -166,7 +166,7 @@ const Licenses = () => {
             { label: 'Expiring Soon', value: stats.expiringSoon, color: 'text-yellow-500' },
             { label: 'Expired', value: stats.expired, color: 'text-red-500' },
             { label: 'Total Seats', value: stats.totalSeats, color: 'text-blue-600' },
-            { label: 'Used Seats', value: stats.usedSeats, color: 'text-green-600' },
+            { label: 'Used Seats', value: stats.usedSeats, color: 'text-emerald-600 dark:text-emerald-400' },
           ].map(s => (
             <Card key={s.label} className="p-4 text-center">
               <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
@@ -184,7 +184,7 @@ const Licenses = () => {
 
         {/* Table */}
         {loading ? (
-          <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-16 bg-slate-200 rounded-lg animate-pulse"></div>)}</div>
+          <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-16 shimmer rounded-md"></div>)}</div>
         ) : filtered.length === 0 ? (
           <Card><CardContent className="py-16 text-center">
             <Key className="h-12 w-12 mx-auto text-slate-300 mb-3" />
@@ -194,7 +194,7 @@ const Licenses = () => {
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left">
+              <thead className="bg-muted/50 text-left">
                 <tr>{['Name', 'Vendor', 'Type', 'Seats', 'Expiry', 'Cost', ''].map(h => (
                   <th key={h} className="px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wide">{h}</th>
                 ))}</tr>
@@ -204,7 +204,7 @@ const Licenses = () => {
                   const expired = isExpired(lic.expiry_date);
                   const expiring = isExpiringSoon(lic.expiry_date);
                   return (
-                    <tr key={lic.id} className="hover:bg-slate-50">
+                    <tr key={lic.id} className="hover:bg-muted/50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="bg-primary/10 p-1.5 rounded"><Key className="h-3.5 w-3.5 text-primary" /></div>
@@ -216,12 +216,12 @@ const Licenses = () => {
                       </td>
                       <td className="px-4 py-3 text-slate-600">{lic.vendor || '—'}</td>
                       <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs capitalize">{lic.license_type}</span>
+                        <span className="px-2 py-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-400 rounded-full text-xs capitalize">{lic.license_type}</span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="text-xs">{lic.seats_used}/{lic.seats_total}</div>
-                          <div className="flex-1 max-w-16 bg-slate-200 rounded-full h-1.5">
+                          <div className="flex-1 max-w-16 bg-muted rounded-full h-1.5">
                             <div className="bg-primary rounded-full h-1.5" style={{ width: `${Math.min(100, (lic.seats_used / lic.seats_total) * 100)}%` }}></div>
                           </div>
                         </div>
@@ -240,8 +240,8 @@ const Licenses = () => {
                       <td className="px-4 py-3">
                         {canEdit && (
                           <div className="flex gap-1">
-                            <button onClick={() => openEdit(lic)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700"><Pencil className="h-3.5 w-3.5" /></button>
-                            <button onClick={() => setDeleteId(lic.id)} className="p-1.5 hover:bg-red-50 rounded text-slate-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                            <button onClick={() => openEdit(lic)} className="p-1.5 hover:bg-muted rounded text-slate-400 hover:text-slate-700"><Pencil className="h-3.5 w-3.5" /></button>
+                            <button onClick={() => setDeleteId(lic.id)} className="p-1.5 hover:bg-destructive/10 rounded-md text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                           </div>
                         )}
                       </td>
@@ -318,7 +318,7 @@ const Licenses = () => {
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button type="button" onClick={() => setShowForm(false)}
-                    className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                    className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-muted/50">Cancel</button>
                   <button type="submit" disabled={saving}
                     className="flex-1 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90 disabled:opacity-50">
                     {saving ? 'Saving...' : editId ? 'Update' : 'Create'}
@@ -336,7 +336,7 @@ const Licenses = () => {
               <h2 className="font-semibold text-lg mb-2">Delete License?</h2>
               <p className="text-sm text-slate-500 mb-6">This action cannot be undone.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-muted/50">Cancel</button>
                 <button onClick={confirmDelete} className="flex-1 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600">Delete</button>
               </div>
             </div>

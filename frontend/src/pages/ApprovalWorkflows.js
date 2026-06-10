@@ -89,13 +89,13 @@ const ApprovalWorkflows = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="workflows-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="workflows-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Approval Workflows
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Configure maker-checker-approver workflows for orders and assets
             </p>
           </div>
@@ -110,7 +110,7 @@ const ApprovalWorkflows = () => {
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
-                <div className="bg-blue-100 p-3 rounded-lg">
+                <div className="bg-blue-500/10 p-3 rounded-md">
                   <UserCog className="h-6 w-6 text-blue-600" />
                 </div>
                 <div>
@@ -127,8 +127,8 @@ const ApprovalWorkflows = () => {
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
-                <div className="bg-orange-100 p-3 rounded-lg">
-                  <UserCheck className="h-6 w-6 text-orange-600" />
+                <div className="bg-amber-500/10 p-3 rounded-md">
+                  <UserCheck className="h-6 w-6 text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">Checker</CardTitle>
@@ -144,8 +144,8 @@ const ApprovalWorkflows = () => {
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
-                <div className="bg-green-100 p-3 rounded-lg">
-                  <CheckCircle2 className="h-6 w-6 text-green-600" />
+                <div className="bg-emerald-500/10 p-3 rounded-md">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">Approver</CardTitle>
@@ -167,7 +167,7 @@ const ApprovalWorkflows = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-16 shimmer rounded-md"></div>
                 ))}
               </div>
             ) : workflows.length === 0 ? (
@@ -200,14 +200,14 @@ const ApprovalWorkflows = () => {
                         )}
                         <TableCell>
                           {workflow.requires_checker ? (
-                            <Badge className="bg-green-100 text-green-800 border-green-300">Yes</Badge>
+                            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20">Yes</Badge>
                           ) : (
                             <Badge variant="outline">No</Badge>
                           )}
                         </TableCell>
                         <TableCell>
                           {workflow.requires_approver ? (
-                            <Badge className="bg-green-100 text-green-800 border-green-300">Yes</Badge>
+                            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20">Yes</Badge>
                           ) : (
                             <Badge variant="outline">No</Badge>
                           )}

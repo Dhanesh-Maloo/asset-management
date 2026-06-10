@@ -95,7 +95,7 @@ const Locations = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold font-heading">Location Master</h1>
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight">Location Master</h1>
             <p className="text-slate-500 mt-1">Manage office locations for asset tracking</p>
           </div>
           {canEdit && (
@@ -126,14 +126,14 @@ const Locations = () => {
             <div className="text-xs text-slate-500 mt-1">Buildings</div>
           </Card>
           <Card className="p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">{[...new Set(locations.map(l => l.floor).filter(Boolean))].length}</div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{[...new Set(locations.map(l => l.floor).filter(Boolean))].length}</div>
             <div className="text-xs text-slate-500 mt-1">Floors</div>
           </Card>
         </div>
 
         {/* List */}
         {loading ? (
-          <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-16 bg-slate-200 rounded-lg animate-pulse"></div>)}</div>
+          <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-16 shimmer rounded-md"></div>)}</div>
         ) : filtered.length === 0 ? (
           <Card>
             <CardContent className="py-16 text-center">
@@ -165,10 +165,10 @@ const Locations = () => {
                     </div>
                     {canEdit && (
                       <div className="flex gap-1 ml-2">
-                        <button onClick={() => openEdit(loc)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700">
+                        <button onClick={() => openEdit(loc)} className="p-1.5 hover:bg-muted rounded text-slate-400 hover:text-slate-700">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button onClick={() => setDeleteId(loc.id)} className="p-1.5 hover:bg-red-50 rounded text-slate-400 hover:text-red-500">
+                        <button onClick={() => setDeleteId(loc.id)} className="p-1.5 hover:bg-destructive/10 rounded-md text-muted-foreground hover:text-destructive">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -205,7 +205,7 @@ const Locations = () => {
                 ))}
                 <div className="flex gap-3 pt-2">
                   <button type="button" onClick={() => setShowForm(false)}
-                    className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                    className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-muted/50">Cancel</button>
                   <button type="submit" disabled={saving}
                     className="flex-1 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90 disabled:opacity-50">
                     {saving ? 'Saving...' : editId ? 'Update' : 'Create'}
@@ -223,7 +223,7 @@ const Locations = () => {
               <h2 className="font-semibold text-lg mb-2">Delete Location?</h2>
               <p className="text-sm text-slate-500 mb-6">This action cannot be undone.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-muted/50">Cancel</button>
                 <button onClick={confirmDelete} className="flex-1 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600">Delete</button>
               </div>
             </div>

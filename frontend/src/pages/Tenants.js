@@ -17,9 +17,9 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const TIER_BADGE = {
-  free: 'bg-slate-100 text-slate-700 border-slate-300',
-  pro: 'bg-blue-100 text-blue-700 border-blue-300',
-  enterprise: 'bg-amber-100 text-amber-700 border-amber-300',
+  free: 'bg-muted text-slate-700 border-slate-300',
+  pro: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300',
+  enterprise: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300',
 };
 
 const Tenants = () => {
@@ -142,13 +142,13 @@ const Tenants = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="tenants-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="tenants-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Tenant Management
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Manage customer organizations and subscriptions
             </p>
           </div>
@@ -166,7 +166,7 @@ const Tenants = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-16 shimmer rounded-md"></div>
                 ))}
               </div>
             ) : tenants.length === 0 ? (
@@ -201,7 +201,7 @@ const Tenants = () => {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20">
                               {tenant.status}
                             </Badge>
                           </TableCell>
@@ -214,7 +214,7 @@ const Tenants = () => {
                                 <Crown className="h-3.5 w-3.5 mr-1.5" />
                                 Change Tier
                               </Button>
-                              <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200" onClick={() => openDeleteDialog(tenant)} data-testid={`delete-tenant-btn-${tenant.id}`}>
+                              <Button size="sm" variant="outline" className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 border-transparent" onClick={() => openDeleteDialog(tenant)} data-testid={`delete-tenant-btn-${tenant.id}`}>
                                 <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                                 Delete
                               </Button>

@@ -86,7 +86,7 @@ const Vendors = () => {
       <div className="p-6 md:p-10 max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold font-heading">Vendor Management</h1>
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight">Vendor Management</h1>
             <p className="text-slate-500 mt-1">Track suppliers, vendors, and their contact details</p>
           </div>
           {canEdit && (
@@ -121,7 +121,7 @@ const Vendors = () => {
         {/* Cards Grid */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => <div key={i} className="h-40 bg-slate-200 rounded-xl animate-pulse"></div>)}
+            {[...Array(6)].map((_, i) => <div key={i} className="h-40 shimmer rounded-lg"></div>)}
           </div>
         ) : filtered.length === 0 ? (
           <Card><CardContent className="py-16 text-center">
@@ -142,14 +142,14 @@ const Vendors = () => {
                       <div>
                         <p className="font-semibold">{v.name}</p>
                         {v.category && (
-                          <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">{v.category}</span>
+                          <span className="text-xs px-2 py-0.5 bg-muted text-slate-600 rounded-full">{v.category}</span>
                         )}
                       </div>
                     </div>
                     {canEdit && (
                       <div className="flex gap-1">
-                        <button onClick={() => openEdit(v)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => setDeleteId(v.id)} className="p-1.5 hover:bg-red-50 rounded text-slate-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => openEdit(v)} className="p-1.5 hover:bg-muted rounded text-slate-400 hover:text-slate-700"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setDeleteId(v.id)} className="p-1.5 hover:bg-destructive/10 rounded-md text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     )}
                   </div>
@@ -217,7 +217,7 @@ const Vendors = () => {
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button type="button" onClick={() => setShowForm(false)}
-                    className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                    className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-muted/50">Cancel</button>
                   <button type="submit" disabled={saving}
                     className="flex-1 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90 disabled:opacity-50">
                     {saving ? 'Saving...' : editId ? 'Update' : 'Create'}
@@ -235,7 +235,7 @@ const Vendors = () => {
               <h2 className="font-semibold text-lg mb-2">Delete Vendor?</h2>
               <p className="text-sm text-slate-500 mb-6">This action cannot be undone.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                <button onClick={() => setDeleteId(null)} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-muted/50">Cancel</button>
                 <button onClick={confirmDelete} className="flex-1 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600">Delete</button>
               </div>
             </div>

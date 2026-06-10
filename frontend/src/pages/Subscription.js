@@ -16,15 +16,15 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const TIER_STYLES = {
-  free: { border: 'border-slate-300', badge: 'bg-slate-100 text-slate-700', icon: 'text-slate-500', gradient: 'from-slate-50 to-slate-100' },
-  pro: { border: 'border-blue-400', badge: 'bg-blue-100 text-blue-700', icon: 'text-blue-500', gradient: 'from-blue-50 to-indigo-50' },
-  enterprise: { border: 'border-amber-400', badge: 'bg-amber-100 text-amber-700', icon: 'text-amber-500', gradient: 'from-amber-50 to-orange-50' },
+  free: { border: 'border-slate-300', badge: 'bg-muted text-slate-700', icon: 'text-slate-500', gradient: 'from-slate-50 to-slate-100' },
+  pro: { border: 'border-blue-400', badge: 'bg-blue-500/10 text-blue-700 dark:text-blue-400', icon: 'text-blue-500', gradient: 'from-blue-50 to-indigo-50' },
+  enterprise: { border: 'border-amber-400', badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-400', icon: 'text-amber-500', gradient: 'from-amber-50 to-orange-50' },
 };
 
 const STATUS_STYLES = {
   paid: 'bg-emerald-100 text-emerald-700',
-  pending: 'bg-amber-100 text-amber-700',
-  overdue: 'bg-red-100 text-red-700',
+  pending: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  overdue: 'bg-red-500/10 text-red-700 dark:text-red-400',
 };
 
 const Subscription = () => {
@@ -147,13 +147,13 @@ ${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid o
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="subscription-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="subscription-page">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+          <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
             Subscription & Billing
           </h1>
-          <p className="text-base text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Monitor your plan, usage, billing history, and explore available tiers
           </p>
         </div>
@@ -161,7 +161,7 @@ ${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid o
         {loading ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {[...Array(3)].map((_, i) => (
-              <Card key={i} className="animate-pulse"><CardContent className="p-6"><div className="h-40 bg-slate-200 rounded" /></CardContent></Card>
+              <Card key={i} className="animate-pulse"><CardContent className="p-6"><div className="h-40 bg-muted rounded" /></CardContent></Card>
             ))}
           </div>
         ) : (

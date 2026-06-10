@@ -16,11 +16,11 @@ const ACTION_ICONS = {
 };
 
 const ACTION_COLORS = {
-  login: 'bg-blue-100 text-blue-700', delete: 'bg-red-100 text-red-700',
-  bulk_delete: 'bg-red-100 text-red-700', create: 'bg-green-100 text-green-700',
-  approve: 'bg-green-100 text-green-700', reject: 'bg-red-100 text-red-700',
-  update: 'bg-yellow-100 text-yellow-700', assign: 'bg-purple-100 text-purple-700',
-  checkout: 'bg-indigo-100 text-indigo-700', return: 'bg-teal-100 text-teal-700',
+  login: 'bg-blue-500/10 text-blue-700 dark:text-blue-400', delete: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  bulk_delete: 'bg-red-500/10 text-red-700 dark:text-red-400', create: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  approve: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', reject: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  update: 'bg-amber-500/10 text-amber-700 dark:text-amber-400', assign: 'bg-violet-500/10 text-violet-700 dark:text-violet-400',
+  checkout: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400', return: 'bg-teal-500/10 text-teal-700 dark:text-teal-400',
 };
 
 function timeAgo(dateStr) {
@@ -116,7 +116,7 @@ const ActivityFeed = () => {
       <div className="p-6 md:p-10 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold font-heading flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight flex items-center gap-2">
               <Activity className="h-8 w-8 text-primary" /> Activity Feed
             </h1>
             <p className="text-slate-500 mt-1">Recent actions and changes across the system</p>
@@ -177,7 +177,7 @@ const ActivityFeed = () => {
           {hasActiveFilters && (
             <button
               onClick={clearFilters}
-              className="px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+              className="px-3 py-1.5 text-sm font-medium text-destructive border border-destructive/20 rounded-md hover:bg-destructive/10 transition-colors"
             >
               Clear Filters
             </button>
@@ -188,10 +188,10 @@ const ActivityFeed = () => {
           <div className="space-y-4">
             {[...Array(8)].map((_, i) => (
               <div key={i} className="flex gap-4 animate-pulse">
-                <div className="w-10 h-10 bg-slate-200 rounded-full flex-shrink-0"></div>
+                <div className="w-10 h-10 bg-muted rounded-full flex-shrink-0"></div>
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-slate-200 rounded w-3/4"></div>
-                  <div className="h-3 bg-slate-200 rounded w-1/2"></div>
+                  <div className="h-4 bg-muted rounded w-3/4"></div>
+                  <div className="h-3 bg-muted rounded w-1/2"></div>
                 </div>
               </div>
             ))}
@@ -206,17 +206,17 @@ const ActivityFeed = () => {
             {Object.entries(grouped).map(([date, items]) => (
               <div key={date}>
                 <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-                  <div className="h-px flex-1 bg-slate-200"></div>
+                  <div className="h-px flex-1 bg-muted"></div>
                   {date}
-                  <div className="h-px flex-1 bg-slate-200"></div>
+                  <div className="h-px flex-1 bg-muted"></div>
                 </h2>
                 <div className="space-y-2">
                   {items.map((act, i) => {
                     const icon = ACTION_ICONS[act.action] || '📋';
-                    const colorClass = ACTION_COLORS[act.action] || 'bg-slate-100 text-slate-600';
+                    const colorClass = ACTION_COLORS[act.action] || 'bg-muted text-slate-600';
                     return (
-                      <div key={i} className="flex items-start gap-3 p-3 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-shadow">
-                        <div className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-lg flex-shrink-0">
+                      <div key={i} className="flex items-start gap-3 p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow">
+                        <div className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-lg flex-shrink-0">
                           {icon}
                         </div>
                         <div className="flex-1 min-w-0">

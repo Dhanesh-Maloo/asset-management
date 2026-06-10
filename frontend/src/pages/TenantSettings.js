@@ -169,11 +169,11 @@ const TenantSettings = () => {
   if (!tenant) {
     return (
       <DashboardLayout>
-        <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto">
+        <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in">
           {user.role === 'super_admin' && tenants.length > 0 ? (
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">Tenant Settings</h1>
-              <p className="text-base text-muted-foreground mb-6">Select a tenant to configure</p>
+              <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">Tenant Settings</h1>
+              <p className="text-sm text-muted-foreground mb-6">Select a tenant to configure</p>
               <Card>
                 <CardContent className="p-6">
                   <Label className="mb-2 block">Select Tenant</Label>
@@ -210,12 +210,12 @@ const TenantSettings = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="tenant-settings-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="tenant-settings-page">
         <div className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+          <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
             Tenant Settings
           </h1>
-          <p className="text-base text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Configure your white-label branding and features
           </p>
         </div>
@@ -225,8 +225,8 @@ const TenantSettings = () => {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="bg-purple-100 p-3 rounded-lg">
-                  <Palette className="h-5 w-5 text-purple-600" />
+                <div className="bg-violet-500/10 p-3 rounded-md">
+                  <Palette className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                 </div>
                 <div>
                   <CardTitle>Branding</CardTitle>
@@ -345,7 +345,7 @@ const TenantSettings = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-blue-100 p-3 rounded-lg">
+                  <div className="bg-blue-500/10 p-3 rounded-md">
                     <Settings className="h-5 w-5 text-blue-600" />
                   </div>
                   <div>
@@ -357,7 +357,7 @@ const TenantSettings = () => {
               <CardContent>
                 <div className="space-y-4">
                   {AVAILABLE_FEATURES.map(feature => (
-                    <div key={feature.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-slate-50 transition-colors">
+                    <div key={feature.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
                       <div className="flex-1">
                         <p className="font-medium">{feature.label}</p>
                         <p className="text-sm text-muted-foreground">{feature.description}</p>
@@ -378,8 +378,8 @@ const TenantSettings = () => {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="bg-green-100 p-3 rounded-lg">
-                  <Bell className="h-5 w-5 text-green-600" />
+                <div className="bg-emerald-500/10 p-3 rounded-md">
+                  <Bell className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
                   <CardTitle>Notifications & Integrations</CardTitle>
@@ -409,7 +409,7 @@ const TenantSettings = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-amber-100 p-3 rounded-lg">
+                  <div className="bg-amber-500/10 p-3 rounded-md">
                     <Database className="h-5 w-5 text-amber-600" />
                   </div>
                   <div>
@@ -423,7 +423,7 @@ const TenantSettings = () => {
               </CardHeader>
               <CardContent>
                 {demoStatus?.has_demo_data ? (
-                  <div className="flex items-center justify-between p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-warning/10 border border-warning/20 rounded-lg">
                     <div className="text-sm text-amber-800">
                       <strong>Demo data is active.</strong> The app currently contains sample data for exploration.
                     </div>
@@ -439,7 +439,7 @@ const TenantSettings = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-muted/50 border border-slate-200 rounded-lg">
                     <div className="text-sm text-slate-600">
                       No demo data loaded. Load sample data to see how the application looks with real content.
                     </div>

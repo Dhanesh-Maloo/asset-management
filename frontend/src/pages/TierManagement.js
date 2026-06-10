@@ -150,13 +150,13 @@ const TierManagement = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="tier-management-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="tier-management-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Tier Management
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Define and manage subscription tiers for tenants
             </p>
           </div>
@@ -174,7 +174,7 @@ const TierManagement = () => {
           <CardContent>
             {loading ? (
               <div className="space-y-3">
-                {[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-slate-100 rounded animate-pulse" />)}
+                {[...Array(3)].map((_, i) => <div key={i} className="h-16 shimmer rounded-md" />)}
               </div>
             ) : tiers.length === 0 ? (
               <div className="text-center py-12">
@@ -217,7 +217,7 @@ const TierManagement = () => {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {tier.is_default && <Badge className="bg-green-100 text-green-700 border-green-200">Default</Badge>}
+                          {tier.is_default && <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-green-200">Default</Badge>}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">

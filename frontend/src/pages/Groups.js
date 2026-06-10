@@ -146,13 +146,13 @@ const Groups = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="groups-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="groups-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Group Management
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Organize users into admin and user groups with custom permissions
             </p>
           </div>
@@ -170,7 +170,7 @@ const Groups = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-16 shimmer rounded-md"></div>
                 ))}
               </div>
             ) : groups.length === 0 ? (
@@ -196,7 +196,7 @@ const Groups = () => {
                       <TableRow key={group.id} data-testid={`group-row-${group.id}`}>
                         <TableCell className="font-medium">{group.name}</TableCell>
                         <TableCell>
-                          <Badge className={group.group_type === 'admin_group' ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-blue-100 text-blue-800 border-blue-300'}>
+                          <Badge className={group.group_type === 'admin_group' ? 'bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20' : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20'}>
                             {group.group_type === 'admin_group' ? 'Admin Group' : 'User Group'}
                           </Badge>
                         </TableCell>

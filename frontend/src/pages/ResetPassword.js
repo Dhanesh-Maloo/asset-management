@@ -6,7 +6,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
-import { ArrowLeft, KeyRound, Check, AlertCircle } from 'lucide-react';
+import { ArrowLeft, KeyRound, Check, AlertCircle, Boxes } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -55,20 +55,18 @@ const ResetPassword = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{
-          backgroundImage:
-            'url(https://images.unsplash.com/photo-1680992046626-418f7e910589?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwyfHxzZXJ2ZXIlMjByb29tJTIwYWJzdHJhY3QlMjB0ZWNobm9sb2d5fGVufDB8fHx8MTc2OTMwNzMwMXww&ixlib=rb-4.1.0&q=85)',
-        }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.9) 0%, rgba(79,70,229,0.8) 100%)' }}
-      />
+    <div className="min-h-screen flex flex-col items-center justify-center bg-sidebar relative overflow-hidden p-4">
+      <div className="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-primary/20 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 -right-24 h-96 w-96 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
 
-      <Card className="w-full max-w-md mx-4 relative z-10 shadow-2xl">
+      <div className="relative flex items-center gap-2.5 mb-6">
+        <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
+          <Boxes className="h-5 w-5 text-white" />
+        </div>
+        <span className="text-lg font-semibold font-heading text-white">IT Asset Management</span>
+      </div>
+
+      <Card className="w-full max-w-md relative z-10 shadow-2xl animate-fade-in">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center font-heading">
             {done ? 'Password Updated' : 'Set New Password'}
@@ -86,8 +84,8 @@ const ResetPassword = () => {
           {/* Invalid link */}
           {invalidLink && (
             <div className="text-center space-y-4">
-              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
-                <AlertCircle className="h-8 w-8 text-red-600" />
+              <div className="mx-auto w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center">
+                <AlertCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
               </div>
               <p className="text-sm text-muted-foreground">
                 This link is invalid. Please request a new password reset.
@@ -101,8 +99,8 @@ const ResetPassword = () => {
           {/* Success */}
           {done && !invalidLink && (
             <div className="text-center space-y-4">
-              <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                <Check className="h-8 w-8 text-green-600" />
+              <div className="mx-auto w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center">
+                <Check className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
               </div>
               <p className="text-sm text-muted-foreground">You can now sign in with your new password.</p>
               <Button className="w-full" onClick={() => navigate('/login')}>
