@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from './ui/button';
 
-const GoogleSignInButton = ({ text = "Continue with Google", variant = "outline" }) => {
+const GoogleSignInButton = ({ text = "Continue with Google", variant = "outline", className = "" }) => {
   const handleGoogleSignIn = () => {
     const redirectUrl = window.location.origin + '/auth/callback';
     const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -26,7 +26,7 @@ const GoogleSignInButton = ({ text = "Continue with Google", variant = "outline"
     <Button
       type="button"
       variant={variant}
-      className="w-full"
+      className={`w-full ${className}`}
       onClick={handleGoogleSignIn}
       data-testid="google-signin-btn"
     >
