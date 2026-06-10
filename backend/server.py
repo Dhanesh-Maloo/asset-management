@@ -1171,6 +1171,15 @@ _rate_limit_store: dict = {}  # {ip: [timestamp, ...]}
 MAX_AUTH_ATTEMPTS = 5
 AUTH_WINDOW_SECONDS = 300  # 5 minutes
 
+def get_client_ip(request: Request) -> str:
+    """Get the real client IP, handling Railway/proxy X-Forwarded-For headers."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
 def check_rate_limit(ip: str):
     now = datetime.now(timezone.utc).timestamp()
     attempts = _rate_limit_store.get(ip, [])
@@ -1574,7 +1583,8 @@ async def public_signup(
 
 @api_router.post("/auth/login")
 async def login(credentials: UserLogin, request: Request, response: Response):
-    check_rate_limit(request.client.host)
+    client_ip = get_client_ip(request)
+    check_rate_limit(client_ip)
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user or not verify_password(credentials.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -1587,7 +1597,7 @@ async def login(credentials: UserLogin, request: Request, response: Response):
 
     user.pop("password_hash", None)
     token = create_access_token({"sub": user["id"], "email": user["email"], "role": user["role"]})
-    await write_audit_log(user["id"], "login", "user", user["id"], f"Login from {request.client.host}")
+    await write_audit_log(user["id"], "login", "user", user["id"], f"Login from {client_ip}")
     return {"token": token, "user": User(**user)}
 
 # Password Reset endpoints
@@ -1600,7 +1610,7 @@ class ResetPasswordRequest(BaseModel):
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest, req: Request):
-    check_rate_limit(req.client.host)
+    check_rate_limit(get_client_ip(req))
     user = await db.users.find_one({"email": request.email}, {"_id": 0})
     if not user:
         # Don't reveal whether email exists
@@ -4822,8 +4832,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Session-ID"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 logging.basicConfig(
