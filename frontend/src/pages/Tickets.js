@@ -139,20 +139,20 @@ const Tickets = () => {
 
   const getPriorityBadge = (priority) => {
     const config = {
-      low: 'bg-slate-100 text-slate-800 border-slate-300',
-      medium: 'bg-blue-100 text-blue-800 border-blue-300',
-      high: 'bg-orange-100 text-orange-800 border-orange-300',
-      critical: 'bg-red-100 text-red-800 border-red-300'
+      low: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
+      medium: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20',
+      high: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20',
+      critical: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20'
     };
     return <Badge className={config[priority]}>{priority.toUpperCase()}</Badge>;
   };
 
   const getStatusBadge = (status) => {
     const config = {
-      open: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      in_progress: 'bg-blue-100 text-blue-800 border-blue-300',
-      resolved: 'bg-green-100 text-green-800 border-green-300',
-      closed: 'bg-slate-100 text-slate-800 border-slate-300'
+      open: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20',
+      in_progress: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20',
+      resolved: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20',
+      closed: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
     };
     return <Badge className={config[status]}>{status.replace('_', ' ').toUpperCase()}</Badge>;
   };
@@ -206,13 +206,13 @@ const Tickets = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="tickets-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="tickets-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Helpdesk Tickets
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Submit and track IT support requests
             </p>
           </div>
@@ -258,7 +258,7 @@ const Tickets = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-16 shimmer rounded-md"></div>
                 ))}
               </div>
             ) : tickets.length === 0 ? (
@@ -536,7 +536,7 @@ const Tickets = () => {
                 <h3 className="font-semibold text-lg">Comments</h3>
                 <p className="text-xs text-slate-500">{commentTicket.ticket_number} — {commentTicket.title}</p>
               </div>
-              <button onClick={() => setCommentTicket(null)} className="p-2 hover:bg-slate-100 rounded-full">
+              <button onClick={() => setCommentTicket(null)} className="p-2 hover:bg-muted rounded-full">
                 <X className="h-5 w-5 text-slate-500" />
               </button>
             </div>
@@ -556,7 +556,7 @@ const Tickets = () => {
                       {(c.author_name || 'U')[0].toUpperCase()}
                     </div>
                     <div className={`max-w-[75%] ${c.author_id === user?.id ? 'items-end' : 'items-start'} flex flex-col`}>
-                      <div className={`px-3 py-2 rounded-2xl text-sm ${c.author_id === user?.id ? 'bg-primary text-white rounded-tr-sm' : 'bg-slate-100 text-slate-800 rounded-tl-sm'}`}>
+                      <div className={`px-3 py-2 rounded-2xl text-sm ${c.author_id === user?.id ? 'bg-primary text-white rounded-tr-sm' : 'bg-muted text-slate-800 rounded-tl-sm'}`}>
                         {c.content}
                       </div>
                       <div className="flex items-center gap-2 mt-1">

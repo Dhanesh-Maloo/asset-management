@@ -135,24 +135,24 @@ const Users = () => {
 
   const getRoleBadge = (role) => {
     const config = {
-      super_admin: 'bg-purple-100 text-purple-800 border-purple-300',
-      tenant_admin: 'bg-blue-100 text-blue-800 border-blue-300',
-      asset_manager: 'bg-green-100 text-green-800 border-green-300',
-      helpdesk_agent: 'bg-orange-100 text-orange-800 border-orange-300',
-      employee: 'bg-slate-100 text-slate-800 border-slate-300'
+      super_admin: 'bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20',
+      tenant_admin: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20',
+      asset_manager: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20',
+      helpdesk_agent: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20',
+      employee: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
     };
     return <Badge className={config[role]}>{role.replace('_', ' ').toUpperCase()}</Badge>;
   };
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="users-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="users-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               User Management
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Manage user accounts and permissions
             </p>
           </div>
@@ -176,7 +176,7 @@ const Users = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-16 shimmer rounded-md"></div>
                 ))}
               </div>
             ) : users.length === 0 ? (
@@ -210,7 +210,8 @@ const Users = () => {
                           </TableCell>
                         )}
                         <TableCell>
-                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                          <Badge variant="outline" className="gap-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 font-medium">
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
                             {u.status}
                           </Badge>
                         </TableCell>
@@ -219,7 +220,7 @@ const Users = () => {
                         </TableCell>
                         <TableCell>
                           {canDeleteUser(u) && (
-                            <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200" onClick={() => openDeleteUser(u)} data-testid={`delete-user-btn-${u.id}`}>
+                            <Button size="sm" variant="ghost" className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => openDeleteUser(u)} data-testid={`delete-user-btn-${u.id}`}>
                               <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                               Delete
                             </Button>
@@ -280,7 +281,7 @@ const Users = () => {
           </DialogHeader>
           {inviteResult ? (
             <div className="space-y-4 py-2">
-              <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm font-medium">
+              <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 text-sm font-medium">
                 <Check className="h-4 w-4 flex-shrink-0" />
                 Invitation created successfully!
               </div>
@@ -290,10 +291,10 @@ const Users = () => {
                   <input
                     readOnly
                     value={inviteResult.invite_link}
-                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs bg-slate-50 font-mono truncate"
+                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs bg-muted/50 font-mono truncate"
                   />
                   <Button size="sm" variant="outline" onClick={copyInviteLink}>
-                    {copiedLink ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                    {copiedLink ? <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">Link expires in 7 days</p>

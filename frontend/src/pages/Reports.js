@@ -69,19 +69,19 @@ const Reports = () => {
       <div className="p-6 md:p-10 max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold font-heading flex items-center gap-2">
-              <FileBarChart className="h-8 w-8 text-primary" /> Reports
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
+              Reports
             </h1>
-            <p className="text-slate-500 mt-1">Advanced analytics and insights</p>
+            <p className="text-sm text-muted-foreground">Advanced analytics and insights</p>
           </div>
           {data && data.length > 0 && (
             <div className="flex gap-2">
               <button onClick={downloadCSV}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                className="flex items-center gap-2 h-9 px-3 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary-hover transition-colors">
                 <Download className="h-4 w-4" /> Export CSV
               </button>
               <button onClick={printReport}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors print:hidden">
+                className="flex items-center gap-2 h-9 px-3 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors print:hidden">
                 <Printer className="h-4 w-4" /> Save as PDF
               </button>
             </div>
@@ -94,7 +94,7 @@ const Reports = () => {
             const Icon = r.icon;
             return (
               <button key={r.id} onClick={() => setActiveReport(r.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeReport === r.id ? 'bg-primary text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-primary hover:text-primary'}`}>
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-md text-sm font-medium transition-colors ${activeReport === r.id ? 'bg-primary text-white shadow-sm' : 'bg-card border border-border text-muted-foreground hover:border-ring hover:text-foreground'}`}>
                 <Icon className="h-4 w-4" /> {r.label}
               </button>
             );
@@ -107,7 +107,7 @@ const Reports = () => {
             <label className="text-sm font-medium text-slate-700">Show warranties expiring within:</label>
             {[30, 60, 90, 180].map(d => (
               <button key={d} onClick={() => { setWarrantyDays(d); fetchReport('expiring-warranties'); }}
-                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${warrantyDays === d ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${warrantyDays === d ? 'bg-primary text-white' : 'bg-muted text-slate-600 hover:bg-slate-200'}`}>
                 {d} days
               </button>
             ))}
@@ -167,7 +167,7 @@ const Reports = () => {
                           <th className="text-right py-2 font-semibold text-slate-600">Total Value</th>
                         </tr></thead>
                         <tbody>{data.map((d, i) => (
-                          <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                          <tr key={i} className="border-b border-slate-50 hover:bg-muted/50">
                             <td className="py-2">{d.department}</td>
                             <td className="py-2 text-right font-medium">{d.asset_count}</td>
                             <td className="py-2 text-right">₹{d.total_value.toLocaleString()}</td>
@@ -234,7 +234,7 @@ const Reports = () => {
                 <CardContent>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead><tr className="border-b bg-slate-50">
+                      <thead><tr className="border-b bg-muted/50">
                         {['Asset Tag', 'Serial Number', 'Warranty Provider', 'Expiry Date', 'Days Left'].map(h => (
                           <th key={h} className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase">{h}</th>
                         ))}
@@ -243,13 +243,13 @@ const Reports = () => {
                         {data.map((a, i) => {
                           const daysLeft = Math.ceil((new Date(a.warranty_end_date) - new Date()) / (1000 * 60 * 60 * 24));
                           return (
-                            <tr key={i} className="hover:bg-slate-50">
+                            <tr key={i} className="hover:bg-muted/50">
                               <td className="px-4 py-3 font-medium">{a.asset_tag}</td>
                               <td className="px-4 py-3 text-slate-600">{a.serial_number}</td>
                               <td className="px-4 py-3 text-slate-600">{a.warranty_provider || '—'}</td>
                               <td className="px-4 py-3">{new Date(a.warranty_end_date).toLocaleDateString()}</td>
                               <td className="px-4 py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${daysLeft <= 7 ? 'bg-red-100 text-red-700' : daysLeft <= 30 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${daysLeft <= 7 ? 'bg-red-500/10 text-red-700 dark:text-red-400' : daysLeft <= 30 ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'}`}>
                                   {daysLeft} days
                                 </span>
                               </td>
@@ -270,14 +270,14 @@ const Reports = () => {
                 <CardContent>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead><tr className="border-b bg-slate-50">
+                      <thead><tr className="border-b bg-muted/50">
                         {['Asset Tag', 'S/N', 'Purchase Price', 'Current Value', 'Depreciation', 'Age (Years)'].map(h => (
                           <th key={h} className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase">{h}</th>
                         ))}
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
                         {data.map((a, i) => (
-                          <tr key={i} className="hover:bg-slate-50">
+                          <tr key={i} className="hover:bg-muted/50">
                             <td className="px-4 py-3 font-medium">{a.asset_tag}</td>
                             <td className="px-4 py-3 text-slate-600">{a.serial_number}</td>
                             <td className="px-4 py-3">₹{(a.purchase_price || 0).toLocaleString()}</td>

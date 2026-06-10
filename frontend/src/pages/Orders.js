@@ -151,10 +151,10 @@ const Orders = () => {
       return <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" />Rejected</Badge>;
     }
     if (order.status === 'fulfilled') {
-      return <Badge className="bg-purple-100 text-purple-800 border-purple-300 gap-1"><PackageIcon className="h-3 w-3" />Fulfilled</Badge>;
+      return <Badge className="bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20 gap-1"><PackageIcon className="h-3 w-3" />Fulfilled</Badge>;
     }
     if (order.status === 'approved') {
-      return <Badge className="bg-green-100 text-green-800 border-green-300 gap-1"><CheckCircle className="h-3 w-3" />Approved</Badge>;
+      return <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 gap-1"><CheckCircle className="h-3 w-3" />Approved</Badge>;
     }
 
     // Pending - show approval stage
@@ -171,7 +171,7 @@ const Orders = () => {
     if (order.approval_stage === 'checker') {
       return (
         <div className="flex items-center gap-2">
-          <Badge className="bg-blue-100 text-blue-800 border-blue-300 gap-1">
+          <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 gap-1">
             <UserCheck className="h-3 w-3" />Checker Approved
           </Badge>
           <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -241,7 +241,7 @@ const Orders = () => {
             size="sm" 
             onClick={() => handleApproverApprove(order.id)}
             data-testid={`approver-approve-btn-${order.id}`}
-            className="bg-green-600 hover:bg-green-700"
+            className="bg-emerald-600 hover:bg-emerald-700"
           >
             <CheckCircle className="h-4 w-4 mr-1" />
             Final Approve
@@ -269,13 +269,13 @@ const Orders = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="orders-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="orders-page">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
               Orders
             </h1>
-            <p className="text-base text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Manage asset orders with maker-checker-approver workflow
             </p>
           </div>
@@ -288,11 +288,11 @@ const Orders = () => {
         </div>
 
         {/* Workflow Explanation */}
-        <Card className="mb-6 bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
+        <Card className="mb-6 bg-gradient-to-r from-primary/5 to-violet-500/5 border-primary/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className="bg-slate-100 p-2 rounded">
+                <div className="bg-muted p-2 rounded">
                   <UserCog className="h-5 w-5 text-slate-600" />
                 </div>
                 <div>
@@ -302,8 +302,8 @@ const Orders = () => {
               </div>
               <ArrowRight className="h-5 w-5 text-slate-400" />
               <div className="flex items-center gap-2">
-                <div className="bg-blue-100 p-2 rounded">
-                  <UserCheck className="h-5 w-5 text-blue-600" />
+                <div className="bg-blue-500/10 p-2 rounded-md">
+                  <UserCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Checker</p>
@@ -312,8 +312,8 @@ const Orders = () => {
               </div>
               <ArrowRight className="h-5 w-5 text-slate-400" />
               <div className="flex items-center gap-2">
-                <div className="bg-green-100 p-2 rounded">
-                  <CheckCircle className="h-5 w-5 text-green-600" />
+                <div className="bg-emerald-500/10 p-2 rounded-md">
+                  <CheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Approver</p>
@@ -332,7 +332,7 @@ const Orders = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-16 shimmer rounded-md"></div>
                 ))}
               </div>
             ) : orders.length === 0 ? (

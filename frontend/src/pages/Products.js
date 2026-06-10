@@ -200,12 +200,12 @@ const Products = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="products-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="products-page">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">Product Catalog</h1>
-            <p className="text-base text-muted-foreground">Browse and order IT equipment and assets</p>
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">Product Catalog</h1>
+            <p className="text-sm text-muted-foreground">Browse and order IT equipment and assets</p>
           </div>
           {canManageProducts && (
             <div className="flex gap-2">
@@ -264,11 +264,11 @@ const Products = () => {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {[...Array(8)].map((_, i) => (
-              <Card key={i} className="animate-pulse">
-                <div className="h-48 bg-slate-200" />
-                <CardContent className="p-4">
-                  <div className="h-4 bg-slate-200 rounded mb-2" />
-                  <div className="h-4 bg-slate-200 rounded w-3/4" />
+              <Card key={i} className="border-border shadow-card overflow-hidden">
+                <div className="h-48 shimmer" />
+                <CardContent className="p-4 space-y-2">
+                  <div className="h-4 shimmer rounded" />
+                  <div className="h-4 shimmer rounded w-3/4" />
                 </CardContent>
               </Card>
             ))}
@@ -282,8 +282,8 @@ const Products = () => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredProducts.map((product) => (
-              <Card key={product.id} className="hover:shadow-lg transition-shadow overflow-hidden" data-testid={`product-card-${product.id}`}>
-                <div className="h-48 bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+              <Card key={product.id} className="group border-border shadow-card hover:shadow-card-hover hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200 overflow-hidden" data-testid={`product-card-${product.id}`}>
+                <div className="h-48 bg-gradient-to-br from-muted to-secondary flex items-center justify-center overflow-hidden">
                   {product.image_url ? (
                     <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" />
                   ) : (
@@ -343,7 +343,7 @@ const Products = () => {
           </DialogHeader>
           {selectedProduct && (
             <div className="space-y-4 py-2">
-              <div className="bg-slate-50 p-4 rounded-lg border">
+              <div className="bg-muted/50 p-4 rounded-lg border">
                 <p className="font-semibold text-lg">{selectedProduct.name}</p>
                 <p className="text-sm text-muted-foreground">{selectedProduct.category}</p>
                 <p className="text-primary font-bold mt-1">
@@ -428,7 +428,7 @@ const Products = () => {
                 <Label htmlFor="image_url">Image URL</Label>
                 <Input id="image_url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} placeholder="https://..." data-testid="product-image-input" maxLength={500} />
                 {formData.image_url && (
-                  <div className="mt-2 h-24 w-24 rounded border overflow-hidden bg-slate-100">
+                  <div className="mt-2 h-24 w-24 rounded border overflow-hidden bg-muted">
                     <img src={formData.image_url} alt="Preview" className="h-full w-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
                   </div>
                 )}
@@ -486,7 +486,7 @@ const Products = () => {
                 <p className="text-sm text-primary font-medium mt-2">{importFile.name}</p>
               )}
             </div>
-            <div className="bg-slate-50 rounded-lg p-4 text-sm">
+            <div className="bg-muted/50 rounded-lg p-4 text-sm">
               <p className="font-semibold mb-2">Required columns:</p>
               <code className="text-xs bg-white px-2 py-1 rounded border block">
                 name, category, description, price, stock
