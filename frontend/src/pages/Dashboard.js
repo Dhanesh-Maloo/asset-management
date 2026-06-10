@@ -74,10 +74,14 @@ const RecentActivityPanel = () => {
 
   useEffect(() => {
     let cancelled = false;
-    axios.get(`${API}/activity-feed`, { params: { page: 1, limit: 12 } })
-      .then(res => { if (!cancelled) setItems(Array.isArray(res.data) ? res.data : []); })
-      .catch(() => { if (!cancelled) setItems([]); });
-    return () => { cancelled = true; };
+    const fetchActivity = () => {
+      axios.get(`${API}/activity-feed`, { params: { page: 1, limit: 12 } })
+        .then(res => { if (!cancelled) setItems(Array.isArray(res.data) ? res.data : []); })
+        .catch(() => { if (!cancelled) setItems(prev => prev ?? []); });
+    };
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 60000); // refresh every minute
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   return (
