@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
+import { useCountUp } from '../hooks/useCountUp';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -33,6 +34,11 @@ const ALL_STAT_CARDS = [
   'Total Assets', 'Assigned Assets', 'Available Assets', 'Open Tickets', 'Pending Orders',
   'Total Tenants', 'Total Users'
 ];
+
+const AnimatedNumber = ({ value }) => {
+  const display = useCountUp(value);
+  return <>{display.toLocaleString()}</>;
+};
 
 const chartTooltipStyle = {
   backgroundColor: 'hsl(var(--popover))',
@@ -208,9 +214,13 @@ const Dashboard = () => {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => (
-              <Card key={i} className="animate-pulse border-border shadow-card">
-                <CardContent className="p-5">
-                  <div className="h-16 bg-muted rounded-md"></div>
+              <Card key={i} className="border-border shadow-card overflow-hidden">
+                <CardContent className="p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="shimmer h-9 w-9 rounded-md" />
+                  </div>
+                  <div className="shimmer h-7 w-16 rounded-md" />
+                  <div className="shimmer h-3.5 w-24 rounded" />
                 </CardContent>
               </Card>
             ))}
@@ -221,20 +231,21 @@ const Dashboard = () => {
               const Icon = stat.icon;
               return (
                 <Card
-                  key={index}
-                  className="group border-border shadow-card hover:shadow-card-hover hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
+                  key={stat.label}
+                  className="group stagger-in border-border shadow-card hover:shadow-card-hover hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
+                  style={{ animationDelay: `${index * 60}ms` }}
                   onClick={() => navigate(stat.link)}
                   data-testid={`stat-card-${stat.label.toLowerCase().replace(/\s+/g, '-')}`}
                 >
                   <CardContent className="p-5">
                     <div className="flex items-center justify-between mb-3">
-                      <div className={`${stat.tint} h-9 w-9 rounded-md flex items-center justify-center`}>
+                      <div className={`${stat.tint} h-9 w-9 rounded-md flex items-center justify-center transition-transform duration-200 group-hover:scale-110`}>
                         <Icon className="h-[18px] w-[18px]" />
                       </div>
                       <ArrowRight className="h-4 w-4 text-muted-foreground/0 group-hover:text-muted-foreground -translate-x-1 group-hover:translate-x-0 transition-all duration-200" />
                     </div>
-                    <p className="text-2xl font-bold font-heading tracking-tight leading-none mb-1.5">
-                      {stat.value.toLocaleString()}
+                    <p className="text-2xl font-bold font-heading tracking-tight leading-none mb-1.5 tabular-nums">
+                      <AnimatedNumber value={stat.value} />
                     </p>
                     <p className="text-[13px] text-muted-foreground">{stat.label}</p>
                   </CardContent>

@@ -31,7 +31,7 @@ import {
 const ALL_ROLES = ['super_admin', 'tenant_admin', 'asset_manager', 'helpdesk_agent', 'employee'];
 const MANAGE_ROLES = ['super_admin', 'tenant_admin', 'asset_manager'];
 
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   {
     label: null, // top-level, no heading
     items: [

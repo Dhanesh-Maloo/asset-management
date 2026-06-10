@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import OnboardingModal from './OnboardingModal';
+import CommandPalette from './CommandPalette';
 import { Menu, Bell, Sun, Moon, Search, User, LogOut, ChevronDown } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,7 +15,7 @@ const DashboardLayout = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const notifRef = useRef(null);
   const userMenuRef = useRef(null);
   const navigate = useNavigate();
@@ -49,20 +50,24 @@ const DashboardLayout = ({ children }) => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  // Ctrl+K / Cmd+K opens the command palette
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(prev => !prev);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const fetchNotifications = async () => {
     try {
       const res = await axios.get(`${API}/notifications`);
       setNotifications(res.data);
     } catch {
       // silently fail
-    }
-  };
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (search.trim()) {
-      navigate('/assets');
-      setSearch('');
     }
   };
 
@@ -101,23 +106,28 @@ const DashboardLayout = ({ children }) => {
             <Menu className="h-5 w-5" />
           </button>
 
-          {/* Search */}
-          <form onSubmit={handleSearch} className="hidden md:flex flex-1 max-w-md">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search assets…"
-                className="w-full h-9 pl-9 pr-3 text-sm bg-secondary/60 border border-transparent rounded-md
-                           placeholder:text-muted-foreground text-foreground
-                           focus:outline-none focus:bg-card focus:border-ring focus:ring-2 focus:ring-ring/20
-                           transition-all"
-                data-testid="global-search"
-              />
-            </div>
-          </form>
+          {/* Command palette trigger */}
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="hidden md:flex items-center gap-2 flex-1 max-w-md h-9 px-3 text-sm
+                       bg-secondary/60 border border-transparent rounded-md text-muted-foreground
+                       hover:bg-card hover:border-border transition-all group"
+            data-testid="global-search"
+          >
+            <Search className="h-4 w-4 shrink-0" />
+            <span className="flex-1 text-left">Search assets, pages, actions…</span>
+            <kbd className="hidden lg:flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-card border border-border text-[10px] font-mono font-medium group-hover:border-ring/40 transition-colors">
+              Ctrl K
+            </kbd>
+          </button>
+
+          {/* Mobile search icon */}
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="md:hidden p-2 hover:bg-accent rounded-md transition-colors"
+          >
+            <Search className="h-5 w-5 text-muted-foreground" />
+          </button>
 
           <div className="flex-1 md:hidden" />
 
@@ -244,6 +254,14 @@ const DashboardLayout = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Command palette (Ctrl+K) */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
+      />
 
       {/* Onboarding modal — shows once on first login */}
       {user?.role && ['tenant_admin', 'asset_manager'].includes(user.role) && (

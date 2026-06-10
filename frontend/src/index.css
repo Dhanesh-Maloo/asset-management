@@ -103,6 +103,39 @@
   .text-balance {
     text-wrap: balance;
   }
+
+  /* Shimmer loading skeleton — premium feel vs flat pulse */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+    background-color: hsl(var(--muted));
+  }
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--card) / 0.6),
+      transparent
+    );
+    animation: shimmer-sweep 1.6s infinite;
+  }
+  @keyframes shimmer-sweep {
+    100% { transform: translateX(100%); }
+  }
+
+  /* Staggered entrance — pair with inline animationDelay */
+  .stagger-in {
+    opacity: 0;
+    animation: fade-in-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 }
 
 /* ── Refined scrollbars ─────────────────────────────── */
