@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload } from 'lucide-react';
+import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -340,15 +340,21 @@ const Assets = () => {
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      available: { className: 'bg-green-100 text-green-800 border-green-300', label: 'Available' },
-      assigned: { className: 'bg-blue-100 text-blue-800 border-blue-300', label: 'Assigned' },
-      in_use: { className: 'bg-purple-100 text-purple-800 border-purple-300', label: 'In Use' },
-      under_maintenance: { className: 'bg-orange-100 text-orange-800 border-orange-300', label: 'Maintenance' },
-      disposed: { className: 'bg-slate-100 text-slate-800 border-slate-300', label: 'Disposed' }
+      available: { className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15', label: 'Available' },
+      assigned: { className: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 hover:bg-blue-500/15', label: 'Assigned' },
+      in_use: { className: 'bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20 hover:bg-violet-500/15', label: 'In Use' },
+      under_maintenance: { className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/15', label: 'Maintenance' },
+      retired: { className: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20 hover:bg-slate-500/15', label: 'Retired' },
+      disposed: { className: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20 hover:bg-slate-500/15', label: 'Disposed' }
     };
-    
+
     const config = statusConfig[status] || statusConfig.available;
-    return <Badge className={config.className}>{config.label}</Badge>;
+    return (
+      <Badge variant="outline" className={`gap-1.5 font-medium ${config.className}`}>
+        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+        {config.label}
+      </Badge>
+    );
   };
 
   const canManage = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
@@ -383,14 +389,14 @@ const Assets = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="assets-page">
-        <div className="mb-8 flex items-center justify-between">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="assets-page">
+        <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold font-heading tracking-tight mb-2">
-              Asset Management
+            <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
+              Assets
             </h1>
-            <p className="text-base text-muted-foreground">
-              Track and manage IT assets lifecycle
+            <p className="text-sm text-muted-foreground">
+              Track and manage your IT asset lifecycle
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -421,21 +427,22 @@ const Assets = () => {
           </div>
         </div>
 
-        <Card>
+        <Card className="border-border shadow-card">
           {/* Bulk Action Bar */}
           {canManage && selectedIds.length > 0 && (
-            <div className="mx-6 mt-4 p-3 bg-primary/10 border border-primary/30 rounded-lg flex items-center gap-3 flex-wrap">
-              <span className="text-sm font-medium text-primary">{selectedIds.length} selected</span>
+            <div className="mx-6 mt-4 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-lg flex items-center gap-3 flex-wrap animate-fade-in">
+              <span className="text-sm font-semibold text-primary">{selectedIds.length} selected</span>
+              <div className="h-4 w-px bg-border" />
               <button onClick={() => setBulkEditOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white text-sm rounded-lg hover:bg-primary/90">
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary-hover transition-colors">
                 <Pencil className="h-3.5 w-3.5" /> Bulk Edit
               </button>
               <button onClick={handlePrintLabels}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 text-white text-sm rounded-lg hover:bg-slate-800">
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors">
                 <Printer className="h-3.5 w-3.5" /> Print Labels
               </button>
               <button onClick={() => setSelectedIds([])}
-                className="text-sm text-slate-500 hover:text-slate-700 underline">
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors ml-auto">
                 Clear selection
               </button>
             </div>
@@ -445,10 +452,12 @@ const Assets = () => {
               <CardTitle>All Assets</CardTitle>
               <div className="flex gap-2 w-full sm:w-auto">
                 <div className="relative flex-1 sm:w-64">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <input
-                    className="pl-8 h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                    placeholder="Search assets..."
+                    className="pl-8 h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm
+                               placeholder:text-muted-foreground
+                               focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all"
+                    placeholder="Search assets…"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                   />
@@ -496,13 +505,24 @@ const Assets = () => {
             {loading ? (
               <div className="space-y-3">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-16 bg-slate-100 rounded animate-pulse"></div>
+                  <div key={i} className="h-14 bg-muted rounded-md animate-pulse"></div>
                 ))}
               </div>
             ) : assets.length === 0 ? (
-              <div className="text-center py-12">
-                <Laptop className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No assets found</p>
+              <div className="text-center py-16">
+                <div className="mx-auto h-14 w-14 rounded-full bg-muted flex items-center justify-center mb-4">
+                  <Laptop className="h-7 w-7 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium mb-1">No assets found</p>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {searchTerm || statusFilter || departmentFilter ? 'Try adjusting your search or filters.' : 'Add your first asset to get started.'}
+                </p>
+                {canManage && !searchTerm && !statusFilter && !departmentFilter && (
+                  <Button size="sm" onClick={() => setAddAssetDialogOpen(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Asset
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -530,30 +550,30 @@ const Assets = () => {
                   <TableBody>
                     {assets.map((asset) => (
                       <TableRow key={asset.id} data-testid={`asset-row-${asset.id}`}
-                        className={selectedIds.includes(asset.id) ? 'bg-primary/5' : ''}>
+                        className={`group transition-colors ${selectedIds.includes(asset.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-accent/50'}`}>
                         {canManage && (
                           <TableCell>
-                            <button onClick={() => toggleSelect(asset.id)} className="text-slate-400 hover:text-primary">
+                            <button onClick={() => toggleSelect(asset.id)} className="text-muted-foreground hover:text-primary transition-colors">
                               {selectedIds.includes(asset.id) ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
                             </button>
                           </TableCell>
                         )}
-                        <TableCell className="font-mono font-semibold text-primary">
+                        <TableCell className="font-mono text-[13px] font-semibold text-primary">
                           <div className="flex items-center gap-1.5">
                             {asset.asset_tag}
                             {asset.is_demo && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300">DEMO</span>
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">DEMO</span>
                             )}
                           </div>
                         </TableCell>
                         <TableCell className="font-medium">
                           {products[asset.product_id]?.name || 'Unknown Product'}
                         </TableCell>
-                        <TableCell className="font-mono text-sm">{asset.serial_number}</TableCell>
+                        <TableCell className="font-mono text-[13px] text-muted-foreground">{asset.serial_number}</TableCell>
                         <TableCell>{getStatusBadge(asset.status)}</TableCell>
                         {user?.role === 'super_admin' && (
                           <TableCell className="text-sm">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground text-xs font-medium">
                               {tenants[asset.tenant_id]?.name || 'Unknown'}
                             </span>
                           </TableCell>
@@ -573,42 +593,48 @@ const Assets = () => {
                         </TableCell>
                         {canManage && (
                           <TableCell>
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => navigate(`/assets/${asset.id}`)}
-                                data-testid={`view-details-btn-${asset.id}`}
-                              >
-                                <Eye className="h-4 w-4 mr-1" />
-                                View Details
-                              </Button>
+                            <div className="flex items-center gap-1">
                               {asset.status === 'available' && (
                                 <Button
                                   size="sm"
+                                  className="h-8 px-2.5"
                                   onClick={() => {
                                     setSelectedAsset(asset);
                                     setDialogOpen(true);
                                   }}
                                   data-testid={`assign-btn-${asset.id}`}
                                 >
+                                  <UserPlus className="h-3.5 w-3.5 mr-1.5" />
                                   Assign
                                 </Button>
                               )}
                               <Button
                                 size="sm"
-                                variant="outline"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                                onClick={() => navigate(`/assets/${asset.id}`)}
+                                title="View details"
+                                data-testid={`view-details-btn-${asset.id}`}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
                                 onClick={() => {
                                   setSelectedAsset(asset);
                                   setStatusDialogOpen(true);
                                 }}
+                                title="Update status"
                                 data-testid={`status-btn-${asset.id}`}
                               >
-                                Update Status
+                                <RefreshCw className="h-4 w-4" />
                               </Button>
                               <Button
                                 size="sm"
-                                variant="outline"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
                                 onClick={() => openEditDialog(asset)}
                                 title="Edit asset"
                               >
@@ -616,11 +642,13 @@ const Assets = () => {
                               </Button>
                               <Button
                                 size="sm"
-                                variant="destructive"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                                 onClick={() => {
                                   setAssetToDelete(asset);
                                   setDeleteDialogOpen(true);
                                 }}
+                                title="Delete asset"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -794,8 +822,8 @@ const Assets = () => {
               </Select>
             </div>
             {assetForm.is_leased && (
-              <div className="space-y-3 p-3 border border-blue-200 rounded-lg bg-blue-50">
-                <p className="text-xs font-semibold text-blue-700">Lease Details</p>
+              <div className="space-y-3 p-3 border border-primary/20 rounded-lg bg-primary/5">
+                <p className="text-xs font-semibold text-primary">Lease Details</p>
                 <div>
                   <Label>Lessor Name</Label>
                   <Input value={assetForm.lessor_name} onChange={e => setAssetForm({ ...assetForm, lessor_name: e.target.value })} placeholder="e.g. ABC Leasing Pvt Ltd" />
@@ -983,8 +1011,8 @@ const Assets = () => {
               </Select>
             </div>
             {editForm.is_leased && (
-              <div className="space-y-3 p-3 border border-blue-200 rounded-lg bg-blue-50">
-                <p className="text-xs font-semibold text-blue-700">Lease Details</p>
+              <div className="space-y-3 p-3 border border-primary/20 rounded-lg bg-primary/5">
+                <p className="text-xs font-semibold text-primary">Lease Details</p>
                 <div>
                   <Label>Lessor Name</Label>
                   <Input value={editForm.lessor_name || ''} onChange={e => setEditForm({ ...editForm, lessor_name: e.target.value })} />

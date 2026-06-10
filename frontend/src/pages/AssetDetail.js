@@ -197,10 +197,10 @@ const AssetDetail = () => {
 
   const getMaintenanceStatusBadge = (status) => {
     const config = {
-      scheduled: { className: 'bg-blue-100 text-blue-800 border-blue-300', label: 'Scheduled' },
-      in_progress: { className: 'bg-orange-100 text-orange-800 border-orange-300', label: 'In Progress' },
-      completed: { className: 'bg-green-100 text-green-800 border-green-300', label: 'Completed' },
-      overdue: { className: 'bg-red-100 text-red-800 border-red-300', label: 'Overdue' }
+      scheduled: { className: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20', label: 'Scheduled' },
+      in_progress: { className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20', label: 'In Progress' },
+      completed: { className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20', label: 'Completed' },
+      overdue: { className: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20', label: 'Overdue' }
     };
     const conf = config[status] || config.scheduled;
     return <Badge className={conf.className}>{conf.label}</Badge>;
@@ -214,11 +214,11 @@ const AssetDetail = () => {
     const daysRemaining = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
     
     if (daysRemaining < 0) {
-      return { status: 'expired', color: 'bg-red-100 text-red-800 border-red-300', label: 'Expired' };
+      return { status: 'expired', color: 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20', label: 'Expired' };
     } else if (daysRemaining <= 30) {
-      return { status: 'expiring', color: 'bg-orange-100 text-orange-800 border-orange-300', label: `Expires in ${daysRemaining} days` };
+      return { status: 'expiring', color: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20', label: `Expires in ${daysRemaining} days` };
     } else {
-      return { status: 'active', color: 'bg-green-100 text-green-800 border-green-300', label: 'Active' };
+      return { status: 'active', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20', label: 'Active' };
     }
   };
 
@@ -483,18 +483,23 @@ const AssetDetail = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto" data-testid="asset-detail-page">
+      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="asset-detail-page">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button variant="outline" onClick={() => navigate('/assets')} size="icon">
+        <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={() => navigate('/assets')} size="icon" className="h-9 w-9 shrink-0">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
-              <h1 className="text-3xl font-bold font-heading tracking-tight">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-xs text-muted-foreground">Assets</span>
+                <span className="text-xs text-muted-foreground">/</span>
+                <span className="text-xs font-medium text-foreground font-mono">{asset.asset_tag}</span>
+              </div>
+              <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight leading-tight">
                 {asset.asset_tag}
               </h1>
-              <p className="text-base text-muted-foreground">{product?.name || 'Unknown Product'}</p>
+              <p className="text-sm text-muted-foreground">{product?.name || 'Unknown Product'}</p>
             </div>
           </div>
           {canManage && (
@@ -535,7 +540,7 @@ const AssetDetail = () => {
               Documents {documents.length > 0 && <span className="ml-1 bg-primary text-white text-xs px-1.5 py-0.5 rounded-full">{documents.length}</span>}
             </TabsTrigger>
             <TabsTrigger value="amc">
-              AMC {amcContracts.length > 0 && <span className="ml-1 bg-green-600 text-white text-xs px-1.5 py-0.5 rounded-full">{amcContracts.length}</span>}
+              AMC {amcContracts.length > 0 && <span className="ml-1 bg-success text-white text-xs px-1.5 py-0.5 rounded-full">{amcContracts.length}</span>}
             </TabsTrigger>
             <TabsTrigger value="qrcode">QR Code</TabsTrigger>
             <TabsTrigger value="photo">Photo</TabsTrigger>
@@ -569,7 +574,7 @@ const AssetDetail = () => {
                       <Separator />
                       <div>
                         <p className="text-sm text-muted-foreground">Ownership</p>
-                        <Badge className="bg-blue-100 text-blue-800 border-blue-300 mt-1">Leased</Badge>
+                        <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 mt-1">Leased</Badge>
                       </div>
                       {asset.lessor_name && <div><p className="text-sm text-muted-foreground">Lessor</p><p className="font-medium">{asset.lessor_name}</p></div>}
                       {asset.lease_end_date && <div><p className="text-sm text-muted-foreground">Lease Ends</p><p>{new Date(asset.lease_end_date).toLocaleDateString()}</p></div>}
@@ -606,7 +611,7 @@ const AssetDetail = () => {
                   {asset.status === 'disposed' && asset.disposal_date && (
                     <>
                       <Separator />
-                      <div className="p-3 bg-slate-100 rounded-lg">
+                      <div className="p-3 bg-muted rounded-lg">
                         <p className="text-sm font-semibold text-slate-600 mb-2">Disposal Information</p>
                         <div className="space-y-1 text-sm">
                           <div><span className="text-muted-foreground">Date: </span>{new Date(asset.disposal_date).toLocaleDateString()}</div>
@@ -710,8 +715,8 @@ const AssetDetail = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-purple-100 p-3 rounded-lg">
-                    <Shield className="h-6 w-6 text-purple-600" />
+                  <div className="bg-violet-500/10 p-3 rounded-md">
+                    <Shield className="h-6 w-6 text-violet-600 dark:text-violet-400" />
                   </div>
                   <div>
                     <CardTitle>Warranty Information</CardTitle>
@@ -728,11 +733,11 @@ const AssetDetail = () => {
                 ) : (
                   <>
                     {warrantyStatus && (
-                      <div className="flex items-center gap-3 p-4 border rounded-lg bg-slate-50">
+                      <div className="flex items-center gap-3 p-4 border rounded-lg bg-muted/50">
                         {warrantyStatus.status === 'active' ? (
-                          <CheckCircle className="h-6 w-6 text-green-600" />
+                          <CheckCircle className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
                         ) : (
-                          <AlertCircle className="h-6 w-6 text-orange-600" />
+                          <AlertCircle className="h-6 w-6 text-amber-600 dark:text-amber-400" />
                         )}
                         <div className="flex-1">
                           <p className="font-semibold">Warranty Status</p>
@@ -772,7 +777,7 @@ const AssetDetail = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-blue-100 p-3 rounded-lg">
+                  <div className="bg-blue-500/10 p-3 rounded-md">
                     <TrendingDown className="h-6 w-6 text-blue-600" />
                   </div>
                   <div>
@@ -810,7 +815,7 @@ const AssetDetail = () => {
                       </Card>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-slate-50">
+                    <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-muted/50">
                       <div>
                         <p className="text-sm text-muted-foreground">Depreciation Method</p>
                         <p className="font-medium capitalize">{(depreciation.depreciation_method || 'none').replace('_', ' ')}</p>
@@ -838,8 +843,8 @@ const AssetDetail = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-indigo-100 p-3 rounded-lg">
-                    <Clock className="h-6 w-6 text-indigo-600" />
+                  <div className="bg-indigo-500/10 p-3 rounded-md">
+                    <Clock className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <div>
                     <CardTitle>Asset History</CardTitle>
@@ -855,12 +860,12 @@ const AssetDetail = () => {
                   </div>
                 ) : (
                   <div className="relative">
-                    <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-slate-200" />
+                    <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-border" />
                     <div className="space-y-4 ml-10">
                       {assetHistory.map((h, i) => (
                         <div key={h.id || i} className="relative">
-                          <div className="absolute -left-6 top-1 h-4 w-4 rounded-full bg-primary border-2 border-white shadow" />
-                          <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                          <div className="absolute -left-6 top-1 h-4 w-4 rounded-full bg-primary border-2 border-card shadow" />
+                          <div className="bg-muted/50 rounded-lg p-3 border border-border">
                             <div className="flex items-center justify-between mb-1">
                               <span className="font-semibold text-sm capitalize text-primary">
                                 {(h.action || '').replace(/_/g, ' ')}
@@ -888,8 +893,8 @@ const AssetDetail = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-green-100 p-3 rounded-lg">
-                    <QrCode className="h-6 w-6 text-green-600" />
+                  <div className="bg-emerald-500/10 p-3 rounded-md">
+                    <QrCode className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
                   </div>
                   <div>
                     <CardTitle>QR Code</CardTitle>
@@ -930,7 +935,7 @@ const AssetDetail = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="bg-purple-100 p-3 rounded-lg"><Camera className="h-6 w-6 text-purple-600" /></div>
+                  <div className="bg-violet-500/10 p-3 rounded-md"><Camera className="h-6 w-6 text-violet-600 dark:text-violet-400" /></div>
                   <div><CardTitle>Asset Photo</CardTitle><CardDescription>Upload a photo for physical identification</CardDescription></div>
                 </div>
               </CardHeader>
@@ -953,7 +958,7 @@ const AssetDetail = () => {
                   </div>
                 ) : (
                   <div className="flex flex-col items-center py-12 gap-4">
-                    <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center">
+                    <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
                       <Camera className="h-10 w-10 text-slate-300" />
                     </div>
                     <p className="text-slate-500 text-sm">No photo uploaded yet</p>
@@ -976,7 +981,7 @@ const AssetDetail = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-3 rounded-lg"><FileText className="h-6 w-6 text-blue-600" /></div>
+                    <div className="bg-blue-500/10 p-3 rounded-md"><FileText className="h-6 w-6 text-blue-600" /></div>
                     <div><CardTitle>Documents</CardTitle><CardDescription>Invoices, warranties, AMC contracts, insurance certificates</CardDescription></div>
                   </div>
                   {canManage && (
@@ -1007,13 +1012,13 @@ const AssetDetail = () => {
                 ) : (
                   <div className="space-y-2">
                     {documents.map(doc => (
-                      <div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50">
+                      <div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50">
                         <div className="flex items-center gap-3">
                           <FileText className="h-8 w-8 text-blue-500 shrink-0" />
                           <div>
                             <p className="font-medium text-sm">{doc.filename}</p>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-xs capitalize px-2 py-0.5 bg-slate-100 rounded-full text-slate-600">{doc.document_type}</span>
+                              <span className="text-xs capitalize px-2 py-0.5 bg-muted rounded-full text-slate-600">{doc.document_type}</span>
                               <span className="text-xs text-slate-400">{(doc.file_size / 1024).toFixed(1)} KB</span>
                               <span className="text-xs text-slate-400">{new Date(doc.created_at).toLocaleDateString()}</span>
                             </div>
@@ -1044,7 +1049,7 @@ const AssetDetail = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="bg-green-100 p-3 rounded-lg"><RefreshCw className="h-6 w-6 text-green-600" /></div>
+                    <div className="bg-emerald-500/10 p-3 rounded-md"><RefreshCw className="h-6 w-6 text-emerald-600 dark:text-emerald-400" /></div>
                     <div><CardTitle>AMC Contracts</CardTitle><CardDescription>Annual Maintenance Contract tracking</CardDescription></div>
                   </div>
                   {canManage && (
@@ -1106,7 +1111,7 @@ const AssetDetail = () => {
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-3">
-                    <div className="bg-orange-100 p-3 rounded-lg"><Settings2 className="h-6 w-6 text-orange-600" /></div>
+                    <div className="bg-amber-500/10 p-3 rounded-md"><Settings2 className="h-6 w-6 text-amber-600 dark:text-amber-400" /></div>
                     <div><CardTitle>Custom Fields</CardTitle><CardDescription>Additional asset attributes defined by your admin</CardDescription></div>
                   </div>
                 </CardHeader>
@@ -1147,7 +1152,7 @@ const AssetDetail = () => {
         {canManage && asset.assigned_to && (
           <div className="mt-6">
             <button onClick={() => setTransferOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium transition-colors">
+              className="flex items-center gap-2 px-4 py-2 bg-muted text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium transition-colors">
               <ArrowRightLeft className="h-4 w-4" /> Request Asset Transfer
             </button>
           </div>
@@ -1202,7 +1207,7 @@ const AssetDetail = () => {
           </DialogHeader>
           {fineInfo ? (
             <div className="space-y-4">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-center">
                 <p className="text-red-700 font-semibold text-lg">Asset Returned Late</p>
                 <p className="text-red-600 mt-1">{fineInfo.days} day(s) overdue</p>
                 {fineInfo.fine > 0 && <p className="text-red-800 font-bold mt-2">Fine: ${fineInfo.fine.toFixed(2)}</p>}
@@ -1238,7 +1243,7 @@ const AssetDetail = () => {
                 />
               </div>
               {asset?.expected_return_date && new Date(asset.expected_return_date) < new Date() && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                <div className="bg-warning/10 border border-warning/20 rounded-lg p-3 text-sm text-amber-700 dark:text-amber-400">
                   This asset is overdue — expected return was {new Date(asset.expected_return_date).toLocaleDateString()}.
                 </div>
               )}
@@ -1390,7 +1395,7 @@ const AssetDetail = () => {
               <Label>Notes / Reason</Label>
               <textarea value={disposeForm.disposal_notes} onChange={e => setDisposeForm({...disposeForm, disposal_notes: e.target.value})} rows={3} placeholder="Reason for disposal..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             </div>
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+            <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg text-sm text-amber-700">
               This asset will be marked as <strong>Disposed</strong>. The record will be kept for compliance and audit. This is different from deleting.
             </div>
           </div>
