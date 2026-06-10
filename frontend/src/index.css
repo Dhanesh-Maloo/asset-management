@@ -5,11 +5,93 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Surfaces */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Brand */
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 245 58% 51%;
+
+    /* Neutrals */
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    /* Semantic */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Lines & focus */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 243 75% 59%;
+
+    /* Sidebar (always dark, both themes) */
+    --sidebar: 224 47% 8%;
+    --sidebar-foreground: 214 20% 80%;
+    --sidebar-muted: 215 16% 52%;
+    --sidebar-border: 220 26% 16%;
+    --sidebar-accent: 243 47% 22%;
+    --sidebar-accent-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 214 32% 91%;
+    --card: 217 33% 17%;
+    --card-foreground: 214 32% 91%;
+    --popover: 217 33% 17%;
+    --popover-foreground: 214 32% 91%;
+
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 243 75% 59%;
+
+    --secondary: 215 25% 27%;
+    --secondary-foreground: 214 32% 91%;
+    --muted: 215 25% 27%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 215 25% 27%;
+    --accent-foreground: 214 32% 91%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 239 84% 67%;
+
+    --sidebar: 224 47% 7%;
+    --sidebar-foreground: 214 20% 80%;
+    --sidebar-muted: 215 16% 52%;
+    --sidebar-border: 220 26% 14%;
+    --sidebar-accent: 243 47% 24%;
+    --sidebar-accent-foreground: 0 0% 100%;
+  }
+
   * {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family: 'Inter', sans-serif;
   }
   h1, h2, h3, h4, h5, h6 {
@@ -23,22 +105,39 @@
   }
 }
 
-/* Dark mode */
-.dark body {
-  background-color: #0f172a;
-  color: #e2e8f0;
+/* ── Refined scrollbars ─────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(215 16% 47% / 0.25);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(215 16% 47% / 0.45);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* ── Legacy dark-mode overrides ─────────────────────────
+   Pages not yet migrated to design tokens use literal
+   utility classes (bg-white, text-slate-*). These keep
+   them readable in dark mode. Remove per-page as pages
+   are migrated to token classes. */
 .dark .bg-white { background-color: #1e293b !important; }
 .dark .bg-slate-50 { background-color: #1e293b !important; }
-.dark .bg-background { background-color: #0f172a !important; }
 .dark header.bg-white { background-color: #1e293b !important; border-color: #334155 !important; }
-.dark aside { background-color: #0f172a !important; }
 .dark .border-slate-200 { border-color: #334155 !important; }
 .dark .border-b { border-color: #334155 !important; }
 .dark .text-slate-500, .dark .text-slate-600 { color: #94a3b8 !important; }
 .dark .text-slate-700, .dark .text-slate-800 { color: #cbd5e1 !important; }
-.dark .text-foreground, .dark .text-slate-900 { color: #e2e8f0 !important; }
-.dark .text-muted-foreground { color: #94a3b8 !important; }
+.dark .text-slate-900 { color: #e2e8f0 !important; }
 .dark [class*="bg-slate-100"] { background-color: #334155 !important; }
 .dark .hover\:bg-slate-50:hover { background-color: #1e293b !important; }
 .dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
