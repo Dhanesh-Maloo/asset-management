@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { toast } from 'sonner';
-import { Boxes, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Boxes, ArrowRight, CheckCircle2, ShieldCheck, Sparkles } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -25,6 +25,15 @@ const CURRENCIES = [
   { value: 'EUR', label: 'EUR — Euro' },
   { value: 'GBP', label: 'GBP — British Pound' },
 ];
+
+const Field = ({ id, label, children, optional }) => (
+  <div className="space-y-1.5">
+    <label htmlFor={id} className="text-[13px] font-semibold text-slate-700">
+      {label} {optional && <span className="text-slate-400 font-normal">(optional)</span>}
+    </label>
+    {children}
+  </div>
+);
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -72,204 +81,221 @@ const Signup = () => {
     }
   };
 
-  const SectionLabel = ({ step, title }) => (
-    <div className="flex items-center gap-3">
-      <div className="h-6 w-6 rounded-md bg-indigo-500/15 border border-indigo-400/30 flex items-center justify-center text-[11px] font-bold text-indigo-300">
-        {step}
-      </div>
-      <h3 className="text-[13px] font-semibold text-white/80 uppercase tracking-wider">{title}</h3>
-      <div className="h-px flex-1 bg-white/[0.07]" />
-    </div>
-  );
-
   return (
-    <div className="auth-canvas auth-noise auth-grid min-h-screen flex flex-col items-center justify-center p-4 py-10">
-      {/* Aurora blobs */}
-      <div className="auth-blob h-[34rem] w-[34rem] bg-indigo-600/40 -top-40 -right-40" />
-      <div className="auth-blob h-[28rem] w-[28rem] bg-violet-600/30 -bottom-32 -left-24" style={{ animationDelay: '-6s' }} />
-      <div className="auth-blob h-72 w-72 bg-cyan-500/20 top-1/4 left-1/4" style={{ animationDelay: '-12s' }} />
-
-      {/* Brand */}
-      <div className="relative flex flex-col items-center mb-8 animate-fade-in">
-        <div className="relative mb-4">
-          <div className="absolute inset-0 rounded-2xl bg-indigo-500/40 blur-xl" />
-          <div className="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-2xl ring-1 ring-white/20">
-            <Boxes className="h-7 w-7 text-white" />
+    <div className="min-h-screen flex bg-white">
+      {/* ── Left: form ─────────────────────────────── */}
+      <div className="flex-1 flex flex-col px-6 sm:px-12 py-8 overflow-y-auto">
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 animate-fade-in">
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+            <Boxes className="h-5 w-5 text-white" />
           </div>
+          <span className="text-[15px] font-bold font-heading tracking-tight text-slate-900">
+            IT Asset Management
+          </span>
         </div>
-        <h1 className="text-xl font-bold font-heading tracking-tight text-white">
-          IT Asset <span className="text-gradient-brand">Management</span>
-        </h1>
-        <p className="text-[13px] text-white/40 mt-1">Start tracking your assets in minutes</p>
-      </div>
 
-      {/* Glass card */}
-      <div className="relative w-full max-w-xl stagger-in" style={{ animationDelay: '100ms' }} data-testid="signup-card">
-        <div className="gradient-ring rounded-2xl p-px">
-          <div className="glass-card rounded-2xl p-7 md:p-8">
-            <h2 className="text-lg font-semibold font-heading text-white mb-1">Create your workspace</h2>
-            <p className="text-sm text-white/40 mb-6">Free trial — no credit card required</p>
-
-            <GoogleSignInButton text="Sign up with Google" className="!bg-white/5 !border-white/10 !text-white hover:!bg-white/10 hover:!text-white h-11" />
-
-            <div className="relative my-6 flex items-center gap-3">
-              <div className="h-px flex-1 bg-white/10" />
-              <span className="text-[11px] uppercase tracking-wider text-white/30">or sign up with email</span>
-              <div className="h-px flex-1 bg-white/10" />
+        {/* Form */}
+        <div className="flex-1 flex items-center justify-center py-10">
+          <div className="w-full max-w-[440px]" data-testid="signup-card">
+            <div className="stagger-in" style={{ animationDelay: '60ms' }}>
+              <h1 className="text-[32px] leading-tight font-bold font-heading tracking-tight text-slate-900 mb-2">
+                Create your workspace
+              </h1>
+              <p className="text-[15px] text-slate-500 mb-8">
+                14-day free trial. No credit card required.
+              </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-7">
-              {/* Company Information */}
-              <div className="space-y-4">
-                <SectionLabel step="1" title="Company" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="company_name" className="text-[13px] font-medium text-white/70">Company Name *</label>
-                    <input
-                      id="company_name"
-                      className="auth-input"
-                      value={formData.company_name}
-                      onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                      placeholder="Acme Corporation"
-                      required
-                      data-testid="signup-company-name"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="domain" className="text-[13px] font-medium text-white/70">Company Domain *</label>
-                    <input
-                      id="domain"
-                      className="auth-input"
-                      value={formData.domain}
-                      onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
-                      placeholder="acme.com"
-                      required
-                      data-testid="signup-domain"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="subdomain" className="text-[13px] font-medium text-white/70">Subdomain <span className="text-white/30">(optional)</span></label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="subdomain"
-                        className="auth-input"
-                        value={formData.subdomain}
-                        onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase() })}
-                        placeholder="acme"
-                        data-testid="signup-subdomain"
-                      />
-                      <span className="text-sm text-white/30 whitespace-nowrap">.yourapp.com</span>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="currency" className="text-[13px] font-medium text-white/70">Base Currency *</label>
-                    <select
-                      id="currency"
-                      className="auth-input appearance-none cursor-pointer [&>option]:bg-slate-900 [&>option]:text-white"
-                      value={formData.currency}
-                      onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                      data-testid="signup-currency"
-                    >
-                      {CURRENCIES.map(c => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
+            <div className="stagger-in" style={{ animationDelay: '120ms' }}>
+              <GoogleSignInButton text="Sign up with Google" className="h-11 !rounded-[10px] !border-slate-200 !text-slate-700 hover:!bg-slate-50" />
 
-              {/* Admin Account */}
-              <div className="space-y-4">
-                <SectionLabel step="2" title="Your Account" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="admin_name" className="text-[13px] font-medium text-white/70">Your Name *</label>
-                    <input
-                      id="admin_name"
-                      className="auth-input"
-                      value={formData.admin_name}
-                      onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })}
-                      placeholder="John Doe"
-                      required
-                      data-testid="signup-admin-name"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="admin_email" className="text-[13px] font-medium text-white/70">Email Address *</label>
-                    <input
-                      id="admin_email"
-                      type="email"
-                      className="auth-input"
-                      value={formData.admin_email}
-                      onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
-                      placeholder="john@acme.com"
-                      required
-                      data-testid="signup-admin-email"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="admin_password" className="text-[13px] font-medium text-white/70">Password *</label>
+              <div className="relative my-7 flex items-center gap-3">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span className="text-xs text-slate-400">or sign up with email</span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5 stagger-in" style={{ animationDelay: '180ms' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field id="company_name" label="Company Name">
                   <input
-                    id="admin_password"
-                    type="password"
-                    className="auth-input"
-                    value={formData.admin_password}
-                    onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
-                    placeholder="••••••••"
+                    id="company_name"
+                    className="auth-input-light no-icon"
+                    value={formData.company_name}
+                    onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                    placeholder="Acme Corporation"
                     required
-                    minLength={6}
-                    data-testid="signup-admin-password"
+                    data-testid="signup-company-name"
                   />
-                  <p className="text-xs text-white/30">Minimum 6 characters</p>
-                </div>
+                </Field>
+                <Field id="domain" label="Company Domain">
+                  <input
+                    id="domain"
+                    className="auth-input-light no-icon"
+                    value={formData.domain}
+                    onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                    placeholder="acme.com"
+                    required
+                    data-testid="signup-domain"
+                  />
+                </Field>
               </div>
 
-              {/* Trial features */}
-              <div className="rounded-xl bg-white/[0.03] border border-white/[0.07] p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-white/40 mb-3">
-                  Included in your free trial
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
-                  {TRIAL_FEATURES.map((feature) => (
-                    <div key={feature} className="flex items-center gap-1.5">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                      <span className="text-[13px] text-white/60">{feature}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field id="subdomain" label="Subdomain" optional>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="subdomain"
+                      className="auth-input-light no-icon"
+                      value={formData.subdomain}
+                      onChange={(e) => setFormData({ ...formData, subdomain: e.target.value.toLowerCase() })}
+                      placeholder="acme"
+                      data-testid="signup-subdomain"
+                    />
+                  </div>
+                </Field>
+                <Field id="currency" label="Base Currency">
+                  <select
+                    id="currency"
+                    className="auth-input-light no-icon appearance-none cursor-pointer"
+                    value={formData.currency}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    data-testid="signup-currency"
+                  >
+                    {CURRENCIES.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </Field>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field id="admin_name" label="Your Name">
+                  <input
+                    id="admin_name"
+                    className="auth-input-light no-icon"
+                    value={formData.admin_name}
+                    onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })}
+                    placeholder="John Doe"
+                    required
+                    data-testid="signup-admin-name"
+                  />
+                </Field>
+                <Field id="admin_email" label="Work Email">
+                  <input
+                    id="admin_email"
+                    type="email"
+                    className="auth-input-light no-icon"
+                    value={formData.admin_email}
+                    onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
+                    placeholder="john@acme.com"
+                    required
+                    data-testid="signup-admin-email"
+                  />
+                </Field>
+              </div>
+
+              <Field id="admin_password" label="Password">
+                <input
+                  id="admin_password"
+                  type="password"
+                  className="auth-input-light no-icon"
+                  value={formData.admin_password}
+                  onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
+                  placeholder="At least 6 characters"
+                  required
+                  minLength={6}
+                  data-testid="signup-admin-password"
+                />
+              </Field>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="auth-btn-primary w-full h-11 rounded-lg text-sm font-semibold text-white disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="auth-btn-primary w-full h-12 rounded-[10px] text-[15px] font-semibold text-white disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
                 data-testid="signup-submit-btn"
               >
                 {loading ? 'Creating Account…' : (
                   <>
                     Create Free Account
-                    <ArrowRight className="h-4 w-4" />
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                   </>
                 )}
               </button>
+
+              <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Your data is isolated per company with role-based access
+              </p>
             </form>
+
+            <p className="mt-6 text-center text-sm text-slate-500 stagger-in" style={{ animationDelay: '240ms' }}>
+              Already have an account?{' '}
+              <a href="/login" className="text-indigo-600 hover:text-indigo-700 font-semibold">
+                Sign in
+              </a>
+            </p>
+          </div>
+        </div>
+
+        <p className="text-xs text-slate-400 animate-fade-in">
+          © {new Date().getFullYear()} IT Asset Management
+        </p>
+      </div>
+
+      {/* ── Right: inset visual panel ──────────────── */}
+      <div className="hidden lg:block lg:w-[44%] xl:w-[46%] p-4">
+        <div className="auth-panel auth-noise relative h-full w-full rounded-[28px] overflow-hidden flex flex-col justify-between p-10">
+          {/* Headline */}
+          <div className="relative z-10 max-w-md animate-fade-in">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-medium text-white/80 mb-5">
+              <Sparkles className="h-3.5 w-3.5" />
+              Free 14-day trial
+            </div>
+            <h2 className="text-3xl xl:text-4xl font-bold font-heading text-white leading-[1.15] mb-4">
+              Start tracking in minutes,
+              <br />
+              not months.
+            </h2>
+            <p className="text-[15px] text-white/60 leading-relaxed">
+              Set up your company workspace, import your assets, and invite your team — all before lunch.
+            </p>
+          </div>
+
+          {/* Floating feature tile */}
+          <div className="relative z-10 flex-1 flex items-center justify-center py-8">
+            <div className="glass-tile auth-float rounded-2xl p-6 w-full max-w-sm" style={{ '--tilt': '-1.5deg' }}>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-white/50 mb-4">
+                Everything in your trial
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {TRIAL_FEATURES.map((feature) => (
+                  <div key={feature} className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-300 shrink-0" />
+                    <span className="text-[13px] text-white/85">{feature}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Trust line */}
+          <div className="relative z-10 flex items-center gap-3 animate-fade-in">
+            <div className="flex -space-x-2">
+              {['AK', 'SR', 'MJ'].map((init) => (
+                <div key={init} className="h-8 w-8 rounded-full bg-white/15 border-2 border-white/25 flex items-center justify-center text-[10px] font-bold text-white">
+                  {init}
+                </div>
+              ))}
+            </div>
+            <p className="text-[13px] text-white/60">
+              Join teams managing thousands of assets every day
+            </p>
           </div>
         </div>
       </div>
-
-      <p className="relative mt-6 text-sm text-white/40 stagger-in" style={{ animationDelay: '200ms' }}>
-        Already have an account?{' '}
-        <a href="/login" className="text-indigo-300 hover:text-indigo-200 font-medium transition-colors">
-          Sign in
-        </a>
-      </p>
-
-      <p className="relative mt-8 text-[11px] text-white/25">
-        © {new Date().getFullYear()} IT Asset Management. All rights reserved.
-      </p>
     </div>
   );
 };

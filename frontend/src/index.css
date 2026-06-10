@@ -259,6 +259,48 @@
   -webkit-text-fill-color: transparent;
 }
 
+/* ── Dribbble-style auth: light form + inset visual panel ── */
+.auth-input-light {
+  width: 100%;
+  height: 2.875rem;
+  padding: 0 0.875rem 0 2.75rem;
+  border-radius: 0.625rem;
+  font-size: 0.875rem;
+  color: hsl(222 47% 11%);
+  background: hsl(210 40% 98%);
+  border: 1px solid hsl(214 32% 88%);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+.auth-input-light::placeholder { color: hsl(215 16% 60%); }
+.auth-input-light:focus {
+  outline: none;
+  background: #fff;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+}
+.auth-input-light.no-icon { padding-left: 0.875rem; }
+.auth-panel {
+  background:
+    radial-gradient(42rem 30rem at 110% -10%, rgba(167, 139, 250, 0.55), transparent 65%),
+    radial-gradient(38rem 28rem at -20% 110%, rgba(34, 211, 238, 0.35), transparent 65%),
+    radial-gradient(30rem 22rem at 20% 10%, rgba(129, 140, 248, 0.5), transparent 70%),
+    linear-gradient(160deg, #312e81 0%, #4338ca 35%, #5b21b6 75%, #6d28d9 100%);
+}
+.auth-float {
+  animation: auth-float 7s ease-in-out infinite;
+}
+@keyframes auth-float {
+  0%, 100% { transform: translateY(0) rotate(var(--tilt, 0deg)); }
+  50% { transform: translateY(-14px) rotate(var(--tilt, 0deg)); }
+}
+.glass-tile {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.35);
+}
+
 /* ── Refined scrollbars ─────────────────────────────── */
 ::-webkit-scrollbar {
   width: 10px;
