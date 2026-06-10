@@ -20,7 +20,8 @@ import {
   Key,
   Settings,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Activity
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -38,6 +39,111 @@ const ALL_STAT_CARDS = [
 const AnimatedNumber = ({ value }) => {
   const display = useCountUp(value);
   return <>{display.toLocaleString()}</>;
+};
+
+const ACTIVITY_ICONS = {
+  login: '🔑', logout: '👋', create: '✨', update: '✏️', delete: '🗑️',
+  assign: '👤', checkout: '📤', return: '📥', approve: '✅', reject: '❌',
+  bulk_delete: '🗑️', bulk_update: '✏️', transfer_complete: '🔄', change_password: '🔒',
+};
+
+const ACTIVITY_COLORS = {
+  login: 'bg-blue-500/10 text-blue-700 dark:text-blue-400',
+  create: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  approve: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  update: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  assign: 'bg-violet-500/10 text-violet-700 dark:text-violet-400',
+  checkout: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400',
+  return: 'bg-teal-500/10 text-teal-700 dark:text-teal-400',
+  delete: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  bulk_delete: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  reject: 'bg-red-500/10 text-red-700 dark:text-red-400',
+};
+
+const timeAgo = (dateStr) => {
+  const diff = Math.floor((new Date() - new Date(dateStr)) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+};
+
+const RecentActivityPanel = () => {
+  const navigate = useNavigate();
+  const [items, setItems] = useState(null); // null = loading, [] = empty/error
+
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${API}/activity-feed`, { params: { page: 1, limit: 12 } })
+      .then(res => { if (!cancelled) setItems(Array.isArray(res.data) ? res.data : []); })
+      .catch(() => { if (!cancelled) setItems([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <Card className="border-border shadow-card stagger-in" style={{ animationDelay: '150ms' }}>
+      <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          Recent Activity
+        </CardTitle>
+        <button
+          onClick={() => navigate('/activity')}
+          className="text-xs text-primary hover:underline font-medium"
+        >
+          View all
+        </button>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {items === null ? (
+          <div className="space-y-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="flex gap-3 items-center">
+                <div className="shimmer h-8 w-8 rounded-full shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="shimmer h-3 rounded w-3/4" />
+                  <div className="shimmer h-2.5 rounded w-1/3" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-8">
+            <Activity className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">No activity yet</p>
+          </div>
+        ) : (
+          <div className="relative">
+            <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
+            <div className="space-y-1">
+              {items.map((act, i) => (
+                <div key={i} className="relative flex items-start gap-3 py-2 group">
+                  <div className="relative z-10 h-8 w-8 rounded-full bg-card border border-border flex items-center justify-center text-sm shrink-0 group-hover:border-primary/40 transition-colors">
+                    {ACTIVITY_ICONS[act.action] || '📋'}
+                  </div>
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${ACTIVITY_COLORS[act.action] || 'bg-muted text-muted-foreground'}`}>
+                        {(act.action || '').replace(/_/g, ' ')}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground capitalize">{act.resource}</span>
+                    </div>
+                    {act.details && (
+                      <p className="text-[13px] text-foreground/80 mt-0.5 line-clamp-2 leading-snug">{act.details}</p>
+                    )}
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{timeAgo(act.timestamp)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 };
 
 const chartTooltipStyle = {
@@ -141,6 +247,8 @@ const Dashboard = () => {
     );
   }
 
+  const canSeeActivity = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
+
   const quickActions = [
     { title: 'Browse Catalog', desc: 'Explore available IT products and equipment', icon: Package, tint: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400', link: '/products' },
     { title: 'Create Ticket', desc: 'Get help with IT issues and requests', icon: Ticket, tint: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', link: '/tickets' },
@@ -169,7 +277,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      <div className="p-6 md:p-8 max-w-7xl mx-auto animate-fade-in" data-testid="dashboard-page">
+      <div className="p-6 md:p-8 max-w-[1440px] mx-auto animate-fade-in" data-testid="dashboard-page">
         {/* Header */}
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
@@ -210,9 +318,13 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {/* Two-column layout: main content + activity feed */}
+        <div className={`grid grid-cols-1 gap-6 items-start ${canSeeActivity ? 'xl:grid-cols-[minmax(0,1fr)_340px]' : ''}`}>
+        <div className="min-w-0">
+
         {/* Stats Grid */}
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[...Array(4)].map((_, i) => (
               <Card key={i} className="border-border shadow-card overflow-hidden">
                 <CardContent className="p-5 space-y-3">
@@ -226,7 +338,7 @@ const Dashboard = () => {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {statCards.filter(s => !hiddenWidgets.includes(s.label)).map((stat, index) => {
               const Icon = stat.icon;
               return (
@@ -449,6 +561,17 @@ const Dashboard = () => {
             })}
           </div>
         </div>
+
+        </div>{/* end main column */}
+
+        {/* Right column: live activity feed (manager roles) */}
+        {canSeeActivity && (
+          <div className="xl:sticky xl:top-6">
+            <RecentActivityPanel />
+          </div>
+        )}
+
+        </div>{/* end two-column grid */}
       </div>
     </DashboardLayout>
   );
