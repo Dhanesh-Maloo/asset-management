@@ -174,7 +174,7 @@ const Dashboard = () => {
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
-              Welcome back, {user?.name?.split(' ')[0]}
+              Welcome back, <span className="text-gradient-primary">{user?.name?.split(' ')[0]}</span>
             </h1>
             <p className="text-sm text-muted-foreground">
               Here's an overview of your IT asset management system

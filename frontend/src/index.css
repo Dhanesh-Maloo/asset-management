@@ -138,6 +138,35 @@
   }
 }
 
+/* ── App canvas: subtle aurora-tinted background ────── */
+.app-canvas {
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(55rem 26rem at 88% -12%, rgba(99, 102, 241, 0.08), transparent 70%),
+    radial-gradient(45rem 22rem at -12% -4%, rgba(56, 189, 248, 0.06), transparent 70%),
+    radial-gradient(40rem 30rem at 50% 115%, rgba(139, 92, 246, 0.05), transparent 70%);
+}
+.dark .app-canvas {
+  background-image:
+    radial-gradient(55rem 26rem at 88% -12%, rgba(99, 102, 241, 0.16), transparent 70%),
+    radial-gradient(45rem 22rem at -12% -4%, rgba(56, 189, 248, 0.08), transparent 70%),
+    radial-gradient(40rem 30rem at 50% 115%, rgba(139, 92, 246, 0.10), transparent 70%);
+}
+
+/* Gradient text for light surfaces (headings, accents) */
+.text-gradient-primary {
+  background: linear-gradient(120deg, #4f46e5 0%, #7c3aed 60%, #6366f1 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.dark .text-gradient-primary {
+  background: linear-gradient(120deg, #a5b4fc 0%, #c4b5fd 60%, #818cf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 /* ── Premium auth canvas ────────────────────────────── */
 .auth-canvas {
   background-color: #06070d;

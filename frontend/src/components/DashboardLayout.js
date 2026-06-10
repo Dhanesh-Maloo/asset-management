@@ -96,7 +96,7 @@ const DashboardLayout = ({ children }) => {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top header */}
-        <header className="bg-card border-b border-border h-14 px-4 flex items-center gap-3 shrink-0">
+        <header className="bg-card/80 backdrop-blur-md border-b border-border h-14 px-4 flex items-center gap-3 shrink-0">
           {/* Mobile menu */}
           <button
             onClick={() => setSidebarOpen(true)}
@@ -250,7 +250,7 @@ const DashboardLayout = ({ children }) => {
         </header>
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto bg-background">
+        <main className="flex-1 overflow-y-auto app-canvas">
           {children}
         </main>
       </div>
