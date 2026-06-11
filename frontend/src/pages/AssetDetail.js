@@ -44,6 +44,9 @@ const AssetDetail = () => {
   const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
+  const [completeMaintenanceDialogOpen, setCompleteMaintenanceDialogOpen] = useState(false);
+  const [selectedMaintenanceId, setSelectedMaintenanceId] = useState(null);
+  const [completeMaintenanceData, setCompleteMaintenanceData] = useState({ cost: '', notes: '', recurrence_days: '' });
   
   const [checkoutData, setCheckoutData] = useState({
     checked_out_to: '',
@@ -192,6 +195,23 @@ const AssetDetail = () => {
       fetchAssetDetails();
     } catch (error) {
       toast.error('Failed to schedule maintenance');
+    }
+  };
+
+  const handleCompleteMaintenance = async () => {
+    try {
+      await axios.post(`${API}/maintenance/${selectedMaintenanceId}/complete`, {
+        cost: parseFloat(completeMaintenanceData.cost) || 0,
+        notes: completeMaintenanceData.notes || '',
+        recurrence_days: parseInt(completeMaintenanceData.recurrence_days) || 0
+      });
+      toast.success('Maintenance marked as completed');
+      setCompleteMaintenanceDialogOpen(false);
+      setCompleteMaintenanceData({ cost: '', notes: '', recurrence_days: '' });
+      setSelectedMaintenanceId(null);
+      fetchAssetDetails();
+    } catch (error) {
+      toast.error('Failed to complete maintenance');
     }
   };
 
@@ -689,6 +709,7 @@ const AssetDetail = () => {
                         <TableHead>Scheduled Date</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Notes</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -700,6 +721,21 @@ const AssetDetail = () => {
                           <TableCell>{getMaintenanceStatusBadge(schedule.status)}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {schedule.description || '-'}
+                          </TableCell>
+                          <TableCell>
+                            {schedule.status !== 'completed' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedMaintenanceId(schedule.id);
+                                  setCompleteMaintenanceDialogOpen(true);
+                                }}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Complete
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1253,6 +1289,54 @@ const AssetDetail = () => {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Complete Maintenance Dialog */}
+      <Dialog open={completeMaintenanceDialogOpen} onOpenChange={setCompleteMaintenanceDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Complete Maintenance</DialogTitle>
+            <DialogDescription>Record the completion details for this maintenance task.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="complete_cost">Cost (₹)</Label>
+              <Input
+                id="complete_cost"
+                type="number"
+                placeholder="0.00"
+                value={completeMaintenanceData.cost}
+                onChange={(e) => setCompleteMaintenanceData({ ...completeMaintenanceData, cost: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="complete_notes">Notes</Label>
+              <Textarea
+                id="complete_notes"
+                placeholder="What was done, parts replaced, etc."
+                value={completeMaintenanceData.notes}
+                onChange={(e) => setCompleteMaintenanceData({ ...completeMaintenanceData, notes: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="recurrence_days">Schedule next in (days, 0 = no repeat)</Label>
+              <Input
+                id="recurrence_days"
+                type="number"
+                placeholder="0"
+                value={completeMaintenanceData.recurrence_days}
+                onChange={(e) => setCompleteMaintenanceData({ ...completeMaintenanceData, recurrence_days: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompleteMaintenanceDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleCompleteMaintenance}>
+              <CheckCircle className="h-4 w-4 mr-1" />
+              Mark Complete
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

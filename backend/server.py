@@ -43,7 +43,7 @@ db = client[os.environ['DB_NAME']]
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
@@ -506,6 +506,11 @@ class MaintenanceScheduleUpdate(BaseModel):
     cost: Optional[float] = None
     notes: Optional[str] = None
 
+class MaintenanceComplete(BaseModel):
+    cost: float = 0.0
+    notes: str = ""
+    recurrence_days: int = 0
+
 class AssetCheckout(BaseModel):
     checked_out_to: str
     expected_return_date: str
@@ -822,7 +827,9 @@ def create_access_token(data: dict) -> str:
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         token = credentials.credentials
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -1166,8 +1173,9 @@ async def get_exchange_rates() -> dict:
         return fallback
 
 
-# ── Simple in-memory rate limiter (login / forgot-password) ──────────────────
-_rate_limit_store: dict = {}  # {ip: [timestamp, ...]}
+# ── Simple in-memory rate limiter ────────────────────────────────────────────
+_rate_limit_store: dict = {}         # login attempts: {ip: [timestamp, ...]}
+_reset_rate_limit_store: dict = {}   # forgot-password attempts: {ip: [timestamp, ...]}
 MAX_AUTH_ATTEMPTS = 5
 AUTH_WINDOW_SECONDS = 300  # 5 minutes
 
@@ -1180,15 +1188,14 @@ def get_client_ip(request: Request) -> str:
         return request.client.host
     return "unknown"
 
-def check_rate_limit(ip: str):
+def check_rate_limit(ip: str, store: dict = _rate_limit_store):
     now = datetime.now(timezone.utc).timestamp()
-    attempts = _rate_limit_store.get(ip, [])
-    # Drop attempts outside the window
+    attempts = store.get(ip, [])
     attempts = [t for t in attempts if now - t < AUTH_WINDOW_SECONDS]
     if len(attempts) >= MAX_AUTH_ATTEMPTS:
         raise HTTPException(status_code=429, detail="Too many attempts. Please wait 5 minutes and try again.")
     attempts.append(now)
-    _rate_limit_store[ip] = attempts
+    store[ip] = attempts
 
 # ── Audit log helper ──────────────────────────────────────────────────────────
 async def write_audit_log(user_id: str, action: str, resource: str, resource_id: str, details: str = ""):
@@ -1651,7 +1658,7 @@ class ResetPasswordRequest(BaseModel):
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest, req: Request):
-    check_rate_limit(get_client_ip(req))
+    check_rate_limit(get_client_ip(req), _reset_rate_limit_store)
     user = await db.users.find_one({"email": request.email}, {"_id": 0})
     if not user:
         # Don't reveal whether email exists
@@ -4045,9 +4052,7 @@ async def get_activity_feed(
 @api_router.post("/maintenance/{maintenance_id}/complete")
 async def complete_maintenance(
     maintenance_id: str,
-    cost: float = 0.0,
-    notes: str = "",
-    recurrence_days: int = 0,
+    body: MaintenanceComplete = MaintenanceComplete(),
     current_user: User = Depends(get_current_user_hybrid)
 ):
     """Mark maintenance as completed and optionally schedule the next one."""
@@ -4059,11 +4064,11 @@ async def complete_maintenance(
     completed_date = datetime.now(timezone.utc).isoformat()
     await db.maintenance_schedules.update_one(
         {"id": maintenance_id},
-        {"$set": {"status": "completed", "completed_date": completed_date, "cost": cost, "notes": notes}}
+        {"$set": {"status": "completed", "completed_date": completed_date, "cost": body.cost, "notes": body.notes}}
     )
     next_id = None
-    if recurrence_days > 0:
-        next_date = (datetime.now(timezone.utc) + timedelta(days=recurrence_days)).isoformat()
+    if body.recurrence_days > 0:
+        next_date = (datetime.now(timezone.utc) + timedelta(days=body.recurrence_days)).isoformat()
         next_maint = MaintenanceSchedule(
             asset_id=maint["asset_id"],
             tenant_id=maint["tenant_id"],
