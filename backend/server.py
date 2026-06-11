@@ -1475,6 +1475,47 @@ async def get_me_oauth(request: Request, current_user: User = Depends(get_curren
     """Get current user info - works with both OAuth session and JWT"""
     return current_user
 
+@api_router.post("/auth/test-email")
+async def test_email(current_user: User = Depends(get_current_user)):
+    """Send a test email to the logged-in user to verify SMTP is working. Admin only."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not SMTP_USER or not SMTP_PASSWORD:
+        raise HTTPException(
+            status_code=400,
+            detail="SMTP is not configured. Set SMTP_USER and SMTP_PASSWORD in your .env file."
+        )
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "IT Asset Management — Test Email"
+    msg["From"] = FROM_EMAIL
+    msg["To"] = current_user.email
+    html_body = f"""
+    <html>
+      <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
+        <h2 style="color:#4F46E5;">Email is Working!</h2>
+        <p>Hello {current_user.name},</p>
+        <p>This is a test email from your IT Asset Management system. SMTP is configured correctly.</p>
+        <p style="color:#6B7280;font-size:13px;">Sent from: {FROM_EMAIL}</p>
+      </body>
+    </html>"""
+    msg.attach(MIMEText(html_body, "html"))
+
+    def _send():
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(FROM_EMAIL, current_user.email, msg.as_string())
+
+    try:
+        await asyncio.to_thread(_send)
+        logging.info(f"Test email sent to {current_user.email}")
+        return {"message": f"Test email sent to {current_user.email}"}
+    except Exception as e:
+        logging.error(f"Test email failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
+
 @api_router.post("/auth/logout")
 async def logout_oauth(request: Request, response: Response):
     """Logout and clear session"""
@@ -4746,14 +4787,12 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
     )
     await db.invite_tokens.insert_one(invite.model_dump())
     # Send invite email
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    invite_link = f"{frontend_url}/invite/{invite.token}"
-    smtp_host = os.environ.get("SMTP_HOST", "")
-    if smtp_host:
+    invite_link = f"{FRONTEND_URL}/invite/{invite.token}"
+    if SMTP_USER and SMTP_PASSWORD:
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = "You're invited to join the Asset Management System"
-            msg["From"] = os.environ.get("SMTP_FROM", "noreply@assetmanagement.com")
+            msg["From"] = FROM_EMAIL
             msg["To"] = invite.email
             html_body = f"""
             <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -4765,15 +4804,16 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
               <p style="color:#888;font-size:12px">This link expires in 7 days. If you did not expect this invite, please ignore this email.</p>
             </div>"""
             msg.attach(MIMEText(html_body, "html"))
-            smtp_port = int(os.environ.get("SMTP_PORT", 587))
-            smtp_user = os.environ.get("SMTP_USER", "")
-            smtp_pass = os.environ.get("SMTP_PASS", "")
-            server = smtplib.SMTP(smtp_host, smtp_port)
-            server.starttls()
-            if smtp_user:
-                server.login(smtp_user, smtp_pass)
-            server.sendmail(msg["From"], [invite.email], msg.as_string())
-            server.quit()
+
+            def _send_invite():
+                with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                    server.sendmail(FROM_EMAIL, [invite.email], msg.as_string())
+
+            await asyncio.to_thread(_send_invite)
+            logging.info(f"Invite email sent to {invite.email}")
         except Exception as e:
             logging.warning(f"Failed to send invite email: {e}")
     return {"message": "Invitation created", "token": invite.token, "invite_link": invite_link}

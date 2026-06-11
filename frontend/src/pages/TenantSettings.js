@@ -10,7 +10,7 @@ import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Separator } from '../components/ui/separator';
-import { Palette, Upload, Settings, Building2, Bell, Database, Trash2 } from 'lucide-react';
+import { Palette, Upload, Settings, Building2, Bell, Database, Trash2, Mail, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -36,6 +36,8 @@ const TenantSettings = () => {
   const [saving, setSaving] = useState(false);
   const [demoStatus, setDemoStatus] = useState(null);
   const [demoLoading, setDemoLoading] = useState(false);
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
+  const [testEmailSent, setTestEmailSent] = useState(false);
   
   const [formData, setFormData] = useState({
     logo_url: '',
@@ -115,6 +117,20 @@ const TenantSettings = () => {
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to delete demo data');
     } finally { setDemoLoading(false); }
+  };
+
+  const handleTestEmail = async () => {
+    setTestEmailLoading(true);
+    setTestEmailSent(false);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/auth/test-email`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      setTestEmailSent(true);
+      toast.success(`Test email sent to ${user.email}! Check your inbox.`);
+    } catch (e) {
+      const msg = e.response?.data?.detail || 'Failed to send test email';
+      toast.error(msg);
+    } finally { setTestEmailLoading(false); }
   };
 
   const handleSelectTenant = (tenantId) => {
@@ -400,6 +416,35 @@ const TenantSettings = () => {
                   Alerts (expiring warranties, overdue maintenance) will be posted here automatically every 24 hours.
                   Get a free webhook URL from Slack → App Directory → Incoming Webhooks, or from Teams → Connectors.
                 </p>
+              </div>
+
+              <div className="border rounded-lg p-4 bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-indigo-500" />
+                      Email (SMTP)
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Used for password reset and user invite emails. Configure <code className="bg-muted px-1 rounded">SMTP_PASSWORD</code> in your server <code className="bg-muted px-1 rounded">.env</code> to activate.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestEmail}
+                    disabled={testEmailLoading}
+                    className="ml-4 shrink-0"
+                  >
+                    {testEmailLoading ? (
+                      'Sending…'
+                    ) : testEmailSent ? (
+                      <><CheckCircle className="h-4 w-4 mr-1 text-green-500" /> Sent!</>
+                    ) : (
+                      <><Mail className="h-4 w-4 mr-1" /> Send Test Email</>
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
