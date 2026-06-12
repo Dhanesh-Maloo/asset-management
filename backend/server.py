@@ -6,10 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
-import smtplib
 import asyncio
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 from typing import List, Optional
@@ -48,12 +45,9 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production'
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-# Email (SMTP) configuration
-SMTP_HOST = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
-SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
-SMTP_USER = os.environ.get('SMTP_USER', '')
-SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', SMTP_USER)
+# Email (Resend API) configuration
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+FROM_EMAIL = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
 # Google OAuth (direct) configuration
@@ -905,21 +899,30 @@ async def get_current_user_hybrid(request: Request):
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 
-# ── Helper: send password reset email via SMTP ──────────────────────────────
-async def send_reset_email(to_email: str, reset_token: str, user_name: str = "") -> bool:
-    """Send a password-reset link via SMTP. Returns True on success."""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        logging.warning("SMTP not configured — skipping email send (set SMTP_USER/SMTP_PASSWORD in .env)")
+# ── Helper: send email via Resend API ───────────────────────────────────────
+async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
+    """Send an email via Resend HTTP API. Returns True on success."""
+    if not RESEND_API_KEY:
+        logging.warning("RESEND_API_KEY not configured — skipping email")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                json={"from": FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body},
+            )
+            resp.raise_for_status()
+        logging.info(f"Email '{subject}' sent to {to_email}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to send email to {to_email}: {e}")
         return False
 
+
+async def send_reset_email(to_email: str, reset_token: str, user_name: str = "") -> bool:
     reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
     greeting = f"Hello {user_name}," if user_name else "Hello,"
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Password Reset Request"
-    msg["From"] = FROM_EMAIL
-    msg["To"] = to_email
-
     html_body = f"""
     <html>
       <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
@@ -942,33 +945,11 @@ async def send_reset_email(to_email: str, reset_token: str, user_name: str = "")
           reset, you can safely ignore this email.
         </p>
       </body>
-    </html>
-    """
-    msg.attach(MIMEText(html_body, "html"))
-
-    def _send():
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(FROM_EMAIL, to_email, msg.as_string())
-
-    try:
-        await asyncio.to_thread(_send)
-        logging.info(f"Password reset email sent to {to_email}")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to send reset email to {to_email}: {e}")
-        return False
+    </html>"""
+    return await _send_email(to_email, "Password Reset Request", html_body)
 
 
-# ── Helper: generic alert email ─────────────────────────────────────────────
 async def send_alert_email(to_email: str, subject: str, items: list, intro: str = "") -> bool:
-    """Send a generic alert email with a list of items."""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        logging.warning("SMTP not configured — skipping alert email")
-        return False
-
     rows = "".join(
         f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{item}</td></tr>"
         for item in items
@@ -986,28 +967,8 @@ async def send_alert_email(to_email: str, subject: str, items: list, intro: str 
           Log in to <a href="{FRONTEND_URL}" style="color:#4F46E5;">IT Asset Management</a> to take action.
         </p>
       </body>
-    </html>
-    """
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = FROM_EMAIL
-    msg["To"] = to_email
-    msg.attach(MIMEText(html_body, "html"))
-
-    def _send():
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(FROM_EMAIL, to_email, msg.as_string())
-
-    try:
-        await asyncio.to_thread(_send)
-        logging.info(f"Alert email '{subject}' sent to {to_email}")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to send alert email: {e}")
-        return False
+    </html>"""
+    return await _send_email(to_email, subject, html_body)
 
 # ── Helper: Slack/Teams webhook notification ────────────────────────────────
 async def send_slack_notification(webhook_url: str, title: str, items: list) -> bool:
@@ -1484,43 +1445,27 @@ async def get_me_oauth(request: Request, current_user: User = Depends(get_curren
 
 @api_router.post("/auth/test-email")
 async def test_email(current_user: User = Depends(get_current_user)):
-    """Send a test email to the logged-in user to verify SMTP is working. Admin only."""
+    """Send a test email to the logged-in user to verify Resend is working. Admin only."""
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    if not SMTP_USER or not SMTP_PASSWORD:
+    if not RESEND_API_KEY:
         raise HTTPException(
             status_code=400,
-            detail="SMTP is not configured. Set SMTP_USER and SMTP_PASSWORD in your .env file."
+            detail="RESEND_API_KEY is not configured. Add it in your Railway environment variables."
         )
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "IT Asset Management — Test Email"
-    msg["From"] = FROM_EMAIL
-    msg["To"] = current_user.email
     html_body = f"""
     <html>
       <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
         <h2 style="color:#4F46E5;">Email is Working!</h2>
         <p>Hello {current_user.name},</p>
-        <p>This is a test email from your IT Asset Management system. SMTP is configured correctly.</p>
+        <p>This is a test email from your IT Asset Management system. Email is configured correctly.</p>
         <p style="color:#6B7280;font-size:13px;">Sent from: {FROM_EMAIL}</p>
       </body>
     </html>"""
-    msg.attach(MIMEText(html_body, "html"))
-
-    def _send():
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(FROM_EMAIL, current_user.email, msg.as_string())
-
-    try:
-        await asyncio.to_thread(_send)
-        logging.info(f"Test email sent to {current_user.email}")
-        return {"message": f"Test email sent to {current_user.email}"}
-    except Exception as e:
-        logging.error(f"Test email failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    ok = await _send_email(current_user.email, "IT Asset Management — Test Email", html_body)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to send email. Check RESEND_API_KEY and FROM_EMAIL.")
+    return {"message": f"Test email sent to {current_user.email}"}
 
 
 @api_router.post("/auth/logout")
@@ -4793,34 +4738,16 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
     await db.invite_tokens.insert_one(invite.model_dump())
     # Send invite email
     invite_link = f"{FRONTEND_URL}/invite/{invite.token}"
-    if SMTP_USER and SMTP_PASSWORD:
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = "You're invited to join the Asset Management System"
-            msg["From"] = FROM_EMAIL
-            msg["To"] = invite.email
-            html_body = f"""
-            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-              <h2 style="color:#4F46E5">You're Invited!</h2>
-              <p>{current_user.name} has invited you to join as <strong>{invite_data.role.replace('_',' ').title()}</strong>.</p>
-              <p style="margin:24px 0">
-                <a href="{invite_link}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Accept Invitation</a>
-              </p>
-              <p style="color:#888;font-size:12px">This link expires in 7 days. If you did not expect this invite, please ignore this email.</p>
-            </div>"""
-            msg.attach(MIMEText(html_body, "html"))
-
-            def _send_invite():
-                with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-                    server.ehlo()
-                    server.starttls()
-                    server.login(SMTP_USER, SMTP_PASSWORD)
-                    server.sendmail(FROM_EMAIL, [invite.email], msg.as_string())
-
-            await asyncio.to_thread(_send_invite)
-            logging.info(f"Invite email sent to {invite.email}")
-        except Exception as e:
-            logging.warning(f"Failed to send invite email: {e}")
+    invite_html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <h2 style="color:#4F46E5">You're Invited!</h2>
+      <p>{current_user.name} has invited you to join as <strong>{invite_data.role.replace('_',' ').title()}</strong>.</p>
+      <p style="margin:24px 0">
+        <a href="{invite_link}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Accept Invitation</a>
+      </p>
+      <p style="color:#888;font-size:12px">This link expires in 7 days. If you did not expect this invite, please ignore this email.</p>
+    </div>"""
+    await _send_email(invite.email, "You're invited to join the Asset Management System", invite_html)
     return {"message": "Invitation created", "token": invite.token, "invite_link": invite_link}
 
 
