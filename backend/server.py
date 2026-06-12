@@ -901,23 +901,20 @@ async def get_current_user_hybrid(request: Request):
 
 # ── Helper: send email via Resend API ───────────────────────────────────────
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Send an email via Resend HTTP API. Returns True on success."""
+    """Send an email via Resend HTTP API. Returns True on success, raises on error."""
     if not RESEND_API_KEY:
         logging.warning("RESEND_API_KEY not configured — skipping email")
         return False
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "https://api.resend.com/emails",
-                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-                json={"from": FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body},
-            )
-            resp.raise_for_status()
-        logging.info(f"Email '{subject}' sent to {to_email}")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to send email to {to_email}: {e}")
-        return False
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={"from": FROM_EMAIL, "to": [to_email], "subject": subject, "html": html_body},
+        )
+        if not resp.is_success:
+            raise Exception(f"Resend API error {resp.status_code}: {resp.text}")
+    logging.info(f"Email '{subject}' sent to {to_email}")
+    return True
 
 
 async def send_reset_email(to_email: str, reset_token: str, user_name: str = "") -> bool:
@@ -946,7 +943,11 @@ async def send_reset_email(to_email: str, reset_token: str, user_name: str = "")
         </p>
       </body>
     </html>"""
-    return await _send_email(to_email, "Password Reset Request", html_body)
+    try:
+        return await _send_email(to_email, "Password Reset Request", html_body)
+    except Exception as e:
+        logging.error(f"Failed to send reset email to {to_email}: {e}")
+        return False
 
 
 async def send_alert_email(to_email: str, subject: str, items: list, intro: str = "") -> bool:
@@ -968,7 +969,11 @@ async def send_alert_email(to_email: str, subject: str, items: list, intro: str 
         </p>
       </body>
     </html>"""
-    return await _send_email(to_email, subject, html_body)
+    try:
+        return await _send_email(to_email, subject, html_body)
+    except Exception as e:
+        logging.error(f"Failed to send alert email: {e}")
+        return False
 
 # ── Helper: Slack/Teams webhook notification ────────────────────────────────
 async def send_slack_notification(webhook_url: str, title: str, items: list) -> bool:
@@ -1462,9 +1467,10 @@ async def test_email(current_user: User = Depends(get_current_user)):
         <p style="color:#6B7280;font-size:13px;">Sent from: {FROM_EMAIL}</p>
       </body>
     </html>"""
-    ok = await _send_email(current_user.email, "IT Asset Management — Test Email", html_body)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Failed to send email. Check RESEND_API_KEY and FROM_EMAIL.")
+    try:
+        await _send_email(current_user.email, "IT Asset Management — Test Email", html_body)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return {"message": f"Test email sent to {current_user.email}"}
 
 
