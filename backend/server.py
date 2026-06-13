@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 from typing import List, Optional
 import uuid
 import re
-import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
@@ -902,28 +901,26 @@ async def get_current_user_hybrid(request: Request):
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 
-# ── Helper: send email via SendGrid SMTP ─────────────────────────────────────
-def _smtp_send(msg: MIMEMultipart, to_email: str) -> None:
-    with smtplib.SMTP("smtp.sendgrid.net", 587, timeout=15) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login("apikey", SENDGRID_API_KEY)
-        server.sendmail(FROM_EMAIL, [to_email], msg.as_string())
-
+# ── Helper: send email via SendGrid HTTP API ─────────────────────────────────
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Send email via SendGrid SMTP. Returns True on success, raises on error."""
+    """Send email via SendGrid HTTP API (port 443 — works on Railway)."""
     if not SENDGRID_API_KEY or not FROM_EMAIL:
         logging.warning("SendGrid not configured — skipping email")
         return False
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = FROM_EMAIL
-    msg["To"] = to_email
-    msg.attach(MIMEText(html_body, "html"))
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _smtp_send, msg, to_email)
-    logging.info(f"Email '{subject}' sent to {to_email} via SendGrid SMTP")
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            headers={"Authorization": f"Bearer {SENDGRID_API_KEY}"},
+            json={
+                "personalizations": [{"to": [{"email": to_email}]}],
+                "from": {"email": FROM_EMAIL},
+                "subject": subject,
+                "content": [{"type": "text/html", "value": html_body}],
+            },
+        )
+        if not resp.is_success:
+            raise Exception(f"SendGrid API error {resp.status_code}: {resp.text}")
+    logging.info(f"Email '{subject}' sent to {to_email} via SendGrid API")
     return True
 
 
