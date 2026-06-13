@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 from typing import List, Optional
 import uuid
 import re
-import base64
+import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
@@ -48,10 +48,8 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production'
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-# Email (Gmail API via OAuth2 — reuses existing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)
-GMAIL_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
-GMAIL_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-GMAIL_REFRESH_TOKEN = os.environ.get('GMAIL_REFRESH_TOKEN', '')
+# Email (SendGrid SMTP)
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', '')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
@@ -904,44 +902,27 @@ async def get_current_user_hybrid(request: Request):
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 
-# ── Helper: send email via Gmail API (OAuth2) ────────────────────────────────
-async def _gmail_access_token() -> str:
-    """Exchange stored refresh token for a short-lived access token."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": GMAIL_CLIENT_ID,
-                "client_secret": GMAIL_CLIENT_SECRET,
-                "refresh_token": GMAIL_REFRESH_TOKEN,
-                "grant_type": "refresh_token",
-            },
-        )
-        if not resp.is_success:
-            raise Exception(f"Gmail token refresh failed {resp.status_code}: {resp.text}")
-        return resp.json()["access_token"]
+# ── Helper: send email via SendGrid SMTP ─────────────────────────────────────
+def _smtp_send(msg: MIMEMultipart, to_email: str) -> None:
+    with smtplib.SMTP("smtp.sendgrid.net", 587) as server:
+        server.ehlo()
+        server.starttls()
+        server.login("apikey", SENDGRID_API_KEY)
+        server.sendmail(FROM_EMAIL, [to_email], msg.as_string())
 
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Send email via Gmail API. Returns True on success, raises on error."""
-    if not all([GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, FROM_EMAIL]):
-        logging.warning("Gmail API not configured — skipping email")
+    """Send email via SendGrid SMTP. Returns True on success, raises on error."""
+    if not SENDGRID_API_KEY or not FROM_EMAIL:
+        logging.warning("SendGrid not configured — skipping email")
         return False
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = FROM_EMAIL
     msg["To"] = to_email
     msg.attach(MIMEText(html_body, "html"))
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    access_token = await _gmail_access_token()
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-            headers={"Authorization": f"Bearer {access_token}"},
-            json={"raw": raw},
-        )
-        if not resp.is_success:
-            raise Exception(f"Gmail API error {resp.status_code}: {resp.text}")
-    logging.info(f"Email '{subject}' sent to {to_email} via Gmail API")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _smtp_send, msg, to_email)
+    logging.info(f"Email '{subject}' sent to {to_email} via SendGrid SMTP")
     return True
 
 
@@ -1478,13 +1459,13 @@ async def get_me_oauth(request: Request, current_user: User = Depends(get_curren
 
 @api_router.post("/auth/test-email")
 async def test_email(current_user: User = Depends(get_current_user)):
-    """Send a test email to the logged-in user to verify Gmail API is working. Admin only."""
+    """Send a test email to the logged-in user to verify SendGrid SMTP is working. Admin only."""
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    if not all([GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, FROM_EMAIL]):
+    if not SENDGRID_API_KEY or not FROM_EMAIL:
         raise HTTPException(
             status_code=400,
-            detail="Gmail API not configured. Add GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, FROM_EMAIL to Railway environment variables."
+            detail="SendGrid not configured. Add SENDGRID_API_KEY and FROM_EMAIL to Railway environment variables."
         )
     html_body = f"""
     <html>
