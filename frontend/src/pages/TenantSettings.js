@@ -423,10 +423,10 @@ const TenantSettings = () => {
                   <div>
                     <p className="text-sm font-medium flex items-center gap-2">
                       <Mail className="h-4 w-4 text-indigo-500" />
-                      Email (SMTP)
+                      Email (SendGrid)
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Used for password reset and user invite emails. Configure <code className="bg-muted px-1 rounded">SMTP_PASSWORD</code> in your server <code className="bg-muted px-1 rounded">.env</code> to activate.
+                      Used for password reset and user invite emails. Powered by SendGrid — configured and active.
                     </p>
                   </div>
                   <Button
