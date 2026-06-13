@@ -904,9 +904,10 @@ async def get_current_user_hybrid(request: Request):
 
 # ── Helper: send email via SendGrid SMTP ─────────────────────────────────────
 def _smtp_send(msg: MIMEMultipart, to_email: str) -> None:
-    with smtplib.SMTP("smtp.sendgrid.net", 587) as server:
+    with smtplib.SMTP("smtp.sendgrid.net", 587, timeout=15) as server:
         server.ehlo()
         server.starttls()
+        server.ehlo()
         server.login("apikey", SENDGRID_API_KEY)
         server.sendmail(FROM_EMAIL, [to_email], msg.as_string())
 
