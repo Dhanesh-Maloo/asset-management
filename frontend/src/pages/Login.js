@@ -1,200 +1,218 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import GoogleSignInButton from '../components/GoogleSignInButton';
 import { toast } from 'sonner';
-import { Boxes, Mail, Lock, ArrowRight, Laptop, CheckCircle2, TrendingUp } from 'lucide-react';
+import { Boxes, Mail, Lock, ArrowRight } from 'lucide-react';
 
 const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const cardRef = useRef(null);
+
+  const handleMouseMove = (e) => {
+    if (!cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = (e.clientX - cx) / (window.innerWidth / 2);
+    const dy = (e.clientY - cy) / (window.innerHeight / 2);
+    const max = 9;
+    setTilt({
+      x: Math.max(-max, Math.min(max, dy * -max)),
+      y: Math.max(-max, Math.min(max, dx * max)),
+    });
+  };
+
+  const handleMouseLeave = () => setTilt({ x: 0, y: 0 });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     const result = await login(formData.email, formData.password);
-
     if (result.success) {
       toast.success('Login successful!');
       navigate('/dashboard');
     } else {
       toast.error(result.error || 'Login failed');
     }
-
     setLoading(false);
   };
 
+  const handleGoogleSignIn = () => {
+    const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+    if (!googleClientId) return;
+    const params = new URLSearchParams({
+      client_id: googleClientId,
+      redirect_uri: window.location.origin + '/auth/callback',
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'offline',
+      prompt: 'select_account',
+    });
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+  };
+
   return (
-    <div className="min-h-screen flex bg-white">
-      {/* ── Left: form ─────────────────────────────── */}
-      <div className="flex-1 flex flex-col px-6 sm:px-12 py-8">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 animate-fade-in">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-            <Boxes className="h-5 w-5 text-white" />
-          </div>
-          <span className="text-[15px] font-bold font-heading tracking-tight text-slate-900">
-            IT Asset Management
-          </span>
-        </div>
+    <div className="auth3d-bg" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+      {/* Background blobs */}
+      <div className="auth3d-blob auth3d-blob-1" />
+      <div className="auth3d-blob auth3d-blob-2" />
+      <div className="auth3d-blob auth3d-blob-3" />
 
-        {/* Form */}
-        <div className="flex-1 flex items-center justify-center py-10">
-          <div className="w-full max-w-[400px]" data-testid="login-card">
-            <div className="stagger-in" style={{ animationDelay: '60ms' }}>
-              <h1 className="text-[32px] leading-tight font-bold font-heading tracking-tight text-slate-900 mb-2">
-                Welcome back
-              </h1>
-              <p className="text-[15px] text-slate-500 mb-8">
-                Sign in to continue to your workspace.
-              </p>
+      {/* Perspective grid floor */}
+      <div className="auth3d-grid" />
+
+      {/* Floating 3D rings */}
+      <div className="auth3d-ring auth3d-ring-1" />
+      <div className="auth3d-ring auth3d-ring-2" />
+      <div className="auth3d-ring auth3d-ring-3" />
+
+      {/* Glowing dots */}
+      <div className="auth3d-dot auth3d-dot-1" />
+      <div className="auth3d-dot auth3d-dot-2" />
+      <div className="auth3d-dot auth3d-dot-3" />
+      <div className="auth3d-dot auth3d-dot-4" />
+      <div className="auth3d-dot auth3d-dot-5" />
+      <div className="auth3d-dot auth3d-dot-6" />
+
+      {/* 3D Card */}
+      <div className="auth3d-perspective">
+        <div
+          ref={cardRef}
+          className="auth3d-card"
+          data-testid="login-card"
+          style={{
+            width: '100%',
+            maxWidth: '420px',
+            padding: '40px 40px 36px',
+            transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
+            transition:
+              tilt.x === 0 && tilt.y === 0
+                ? 'transform 0.65s cubic-bezier(0.16,1,0.3,1)'
+                : 'transform 0.08s ease-out',
+          }}
+        >
+          {/* Logo */}
+          <div className="flex items-center gap-3 mb-8">
+            <div className="auth3d-logo">
+              <Boxes className="h-5 w-5 text-white" />
+            </div>
+            <span
+              className="font-bold text-[15px] tracking-tight"
+              style={{ color: 'rgba(255,255,255,0.9)', fontFamily: 'Manrope, sans-serif' }}
+            >
+              IT Asset Management
+            </span>
+          </div>
+
+          {/* Heading */}
+          <h1
+            className="text-[30px] font-bold leading-tight mb-2"
+            style={{ color: '#fff', fontFamily: 'Manrope, sans-serif' }}
+          >
+            Welcome back
+          </h1>
+          <p className="text-sm mb-7" style={{ color: 'rgba(255,255,255,0.38)' }}>
+            Sign in to continue to your workspace.
+          </p>
+
+          {/* Google */}
+          <button
+            type="button"
+            className="auth3d-google-btn"
+            onClick={handleGoogleSignIn}
+            data-testid="google-signin-btn"
+          >
+            <svg className="mr-2.5 h-5 w-5 flex-shrink-0" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            </svg>
+            Continue with Google
+          </button>
+
+          <div className="auth3d-divider">
+            <span>or sign in with email</span>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="auth3d-label">Email</label>
+              <div className="auth3d-field">
+                <Mail className="auth3d-field-icon" />
+                <input
+                  id="email"
+                  type="email"
+                  className="auth3d-input"
+                  placeholder="you@company.com"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
+                  data-testid="login-email-input"
+                />
+              </div>
             </div>
 
-            <div className="stagger-in" style={{ animationDelay: '120ms' }}>
-              <GoogleSignInButton className="h-11 !rounded-[10px] !border-slate-200 !text-slate-700 hover:!bg-slate-50" />
-
-              <div className="relative my-7 flex items-center gap-3">
-                <div className="h-px flex-1 bg-slate-200" />
-                <span className="text-xs text-slate-400">or sign in with email</span>
-                <div className="h-px flex-1 bg-slate-200" />
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="auth3d-label" style={{ marginBottom: 0 }}>Password</label>
+                <a
+                  href="/forgot-password"
+                  className="text-[11px] font-medium transition-colors"
+                  style={{ color: 'rgba(129,140,248,0.85)' }}
+                  data-testid="forgot-password-link"
+                >
+                  Forgot password?
+                </a>
+              </div>
+              <div className="auth3d-field">
+                <Lock className="auth3d-field-icon" />
+                <input
+                  id="password"
+                  type="password"
+                  className="auth3d-input"
+                  placeholder="••••••••"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  required
+                  data-testid="login-password-input"
+                />
               </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5 stagger-in" style={{ animationDelay: '180ms' }}>
-              <div className="space-y-1.5">
-                <label htmlFor="email" className="text-[13px] font-semibold text-slate-700">Email</label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-400 pointer-events-none" />
-                  <input
-                    id="email"
-                    type="email"
-                    className="auth-input-light"
-                    placeholder="you@company.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
-                    data-testid="login-email-input"
-                  />
-                </div>
-              </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="auth3d-btn"
+              data-testid="login-submit-btn"
+            >
+              {loading ? (
+                'Signing in…'
+              ) : (
+                <>
+                  Sign In
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
+          </form>
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="password" className="text-[13px] font-semibold text-slate-700">Password</label>
-                  <a href="/forgot-password" className="text-[13px] text-indigo-600 hover:text-indigo-700 font-medium" data-testid="forgot-password-link">
-                    Forgot password?
-                  </a>
-                </div>
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-400 pointer-events-none" />
-                  <input
-                    id="password"
-                    type="password"
-                    className="auth-input-light"
-                    placeholder="••••••••"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    required
-                    data-testid="login-password-input"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="auth-btn-primary w-full h-12 rounded-[10px] text-[15px] font-semibold text-white disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
-                data-testid="login-submit-btn"
-              >
-                {loading ? 'Signing in…' : (
-                  <>
-                    Sign In
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                  </>
-                )}
-              </button>
-            </form>
-
-            <p className="mt-8 text-center text-sm text-slate-500 stagger-in" style={{ animationDelay: '240ms' }}>
-              Don't have an account?{' '}
-              <a href="/signup" className="text-indigo-600 hover:text-indigo-700 font-semibold">
-                Start your free trial
-              </a>
-            </p>
-          </div>
-        </div>
-
-        <p className="text-xs text-slate-400 animate-fade-in">
-          © {new Date().getFullYear()} IT Asset Management
-        </p>
-      </div>
-
-      {/* ── Right: inset visual panel ──────────────── */}
-      <div className="hidden lg:block lg:w-[48%] xl:w-[52%] p-4">
-        <div className="auth-panel auth-noise relative h-full w-full rounded-[28px] overflow-hidden flex flex-col justify-between p-10">
-          {/* Headline */}
-          <div className="relative z-10 max-w-md animate-fade-in">
-            <h2 className="text-3xl xl:text-4xl font-bold font-heading text-white leading-[1.15] mb-4">
-              Every asset.
-              <br />
-              One source of truth.
-            </h2>
-            <p className="text-[15px] text-white/60 leading-relaxed">
-              Track hardware, software and licenses across your entire company — from purchase to retirement.
-            </p>
-          </div>
-
-          {/* Floating glass tiles */}
-          <div className="relative z-10 flex-1 flex items-center justify-center py-8">
-            <div className="relative w-full max-w-sm h-64">
-              {/* Stat tile */}
-              <div className="glass-tile auth-float absolute top-0 left-0 rounded-2xl p-5 w-56" style={{ '--tilt': '-3deg' }}>
-                <div className="flex items-center gap-2.5 mb-3">
-                  <div className="h-8 w-8 rounded-lg bg-white/15 flex items-center justify-center">
-                    <Laptop className="h-4 w-4 text-white" />
-                  </div>
-                  <span className="text-[13px] font-medium text-white/70">Total Assets</span>
-                </div>
-                <p className="text-3xl font-bold font-heading text-white tabular-nums">1,248</p>
-                <div className="flex items-center gap-1 mt-1.5">
-                  <TrendingUp className="h-3.5 w-3.5 text-emerald-300" />
-                  <span className="text-xs text-emerald-300 font-medium">+12% this quarter</span>
-                </div>
-              </div>
-
-              {/* Activity tile */}
-              <div className="glass-tile auth-float absolute bottom-0 right-0 rounded-2xl p-4 w-64" style={{ '--tilt': '2deg', animationDelay: '-3.5s' }}>
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-emerald-400/20 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="h-4.5 w-4.5 text-emerald-300" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-white truncate">MacBook Pro M3 assigned</p>
-                    <p className="text-xs text-white/50">to Priya Sharma · just now</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Testimonial */}
-          <div className="relative z-10 animate-fade-in">
-            <p className="text-[15px] text-white/85 leading-relaxed mb-3 max-w-md">
-              "We replaced three spreadsheets and a shared inbox with this. Asset audits went from two weeks to one afternoon."
-            </p>
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-white/15 border border-white/20 flex items-center justify-center text-[12px] font-bold text-white">
-                RK
-              </div>
-              <div>
-                <p className="text-[13px] font-semibold text-white">Rahul Krishnan</p>
-                <p className="text-xs text-white/50">IT Manager, 400-person company</p>
-              </div>
-            </div>
-          </div>
+          {/* Footer */}
+          <p className="text-center text-sm mt-6" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            Don't have an account?{' '}
+            <a
+              href="/signup"
+              className="font-semibold transition-colors"
+              style={{ color: 'rgba(129,140,248,0.9)' }}
+            >
+              Start your free trial
+            </a>
+          </p>
         </div>
       </div>
     </div>
