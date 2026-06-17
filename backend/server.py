@@ -51,6 +51,8 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', '')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+_cors_env = os.environ.get('CORS_ORIGINS', '')
+CORS_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()] or [FRONTEND_URL, 'http://localhost:3000']
 
 # Google OAuth (direct) configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -4815,8 +4817,8 @@ app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=False,
-    allow_origins=["*"],
+    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
