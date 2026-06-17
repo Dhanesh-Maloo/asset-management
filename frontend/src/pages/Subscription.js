@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { useSearchParams } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Progress } from '../components/ui/progress';
 import { Separator } from '../components/ui/separator';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Crown, Check, AlertTriangle, Users, Laptop, ShoppingCart, Ticket, Zap, FileText, Download, Mail, CalendarDays, ArrowUpCircle } from 'lucide-react';
+import { Crown, Check, AlertTriangle, Users, Laptop, ShoppingCart, Ticket, Zap, FileText, Download, CreditCard, CalendarDays, ArrowUpCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -29,12 +29,27 @@ const STATUS_STYLES = {
 
 const Subscription = () => {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tiers, setTiers] = useState([]);
   const [usage, setUsage] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [selectedTier, setSelectedTier] = useState(null);
+  const [payingTierId, setPayingTierId] = useState(null);
+
+  useEffect(() => {
+    const payment = searchParams.get('payment');
+    if (payment === 'success') {
+      toast.success('Payment successful! Your plan has been upgraded.');
+      setSearchParams({}, { replace: true });
+    } else if (payment === 'failed') {
+      toast.error('Payment failed or was cancelled. Please try again.');
+      setSearchParams({}, { replace: true });
+    } else if (payment === 'tampered') {
+      toast.error('Payment verification failed. Please contact support.');
+      setSearchParams({}, { replace: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -74,8 +89,8 @@ const Subscription = () => {
 
   const formatLimit = (val) => (val === -1 ? 'Unlimited' : val);
 
-  const formatCurrency = (amount, currency = 'USD') => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+  const formatCurrency = (amount, currency = 'INR') => {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
   };
 
   const formatDate = (iso) => {
@@ -125,15 +140,30 @@ ${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid o
     setTimeout(() => w.print(), 300);
   };
 
-  const openUpgradeDialog = (tier) => {
-    setSelectedTier(tier);
-    setUpgradeOpen(true);
-  };
+  const handlePayment = useCallback(async (tier) => {
+    setPayingTierId(tier.id);
+    try {
+      const res = await axios.post(`${API}/payments/initiate`, { tier_id: tier.id });
+      const { payu_url, params } = res.data;
 
-  const handleUpgradeRequest = () => {
-    toast.success(`Upgrade request for ${selectedTier?.name} plan sent to your administrator.`);
-    setUpgradeOpen(false);
-  };
+      // Build and auto-submit a hidden form to PayU
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = payu_url;
+      Object.entries(params).forEach(([k, v]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = k;
+        input.value = v;
+        form.appendChild(input);
+      });
+      document.body.appendChild(form);
+      form.submit();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to initiate payment. Please try again.');
+      setPayingTierId(null);
+    }
+  }, []);
 
   const currentTierSlug = usage?.tier?.slug || 'free';
   const style = (slug) => TIER_STYLES[slug] || TIER_STYLES.free;
@@ -253,6 +283,19 @@ ${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid o
                           )}
                         </div>
                         <CardDescription className="mt-1">{tier.description}</CardDescription>
+                        <div className="mt-3">
+                          {tier.price_monthly > 0 ? (
+                            <div className="flex items-baseline gap-1">
+                              <span className="text-3xl font-bold font-heading">{formatCurrency(tier.price_monthly, tier.currency || 'INR')}</span>
+                              <span className="text-sm text-muted-foreground">/month</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-baseline gap-1">
+                              <span className="text-3xl font-bold font-heading">Free</span>
+                              <span className="text-sm text-muted-foreground">forever</span>
+                            </div>
+                          )}
+                        </div>
                       </CardHeader>
                       <CardContent className="relative">
                         <ul className="space-y-2.5 mb-6">
@@ -267,15 +310,24 @@ ${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid o
                           <Button variant="outline" disabled className="w-full" data-testid={`plan-btn-${tier.slug}`}>
                             Current Plan
                           </Button>
+                        ) : tier.price_monthly <= 0 ? (
+                          <Button variant="outline" disabled className="w-full" data-testid={`plan-btn-${tier.slug}`}>
+                            Free Plan
+                          </Button>
                         ) : (
                           <Button
                             variant={isUpgrade ? 'default' : 'outline'}
                             className="w-full"
                             data-testid={`plan-btn-${tier.slug}`}
-                            onClick={() => openUpgradeDialog(tier)}
+                            disabled={payingTierId === tier.id}
+                            onClick={() => handlePayment(tier)}
                           >
-                            {isUpgrade ? <ArrowUpCircle className="h-4 w-4 mr-2" /> : null}
-                            {isUpgrade ? 'Upgrade' : 'Switch'} to {tier.name}
+                            {payingTierId === tier.id ? (
+                              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Redirecting to PayU…</>
+                            ) : (
+                              <>{isUpgrade ? <ArrowUpCircle className="h-4 w-4 mr-2" /> : <CreditCard className="h-4 w-4 mr-2" />}
+                              {isUpgrade ? 'Upgrade' : 'Switch'} — Pay {formatCurrency(tier.price_monthly, tier.currency || 'INR')}</>
+                            )}
                           </Button>
                         )}
                       </CardContent>
@@ -361,45 +413,6 @@ ${invoice.paid_at ? `<p style="margin-top:16px;font-size:13px;color:#555">Paid o
         )}
       </div>
 
-      {/* Upgrade / Plan Change Dialog */}
-      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="h-5 w-5 text-primary" />
-              Request Plan Change
-            </DialogTitle>
-            <DialogDescription>
-              {selectedTier && (
-                <>
-                  You're requesting to switch to the <strong>{selectedTier.name}</strong> plan.
-                  Your administrator will be notified and will reach out to process the change.
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {selectedTier && (
-            <div className={`rounded-lg border p-4 bg-gradient-to-b ${(TIER_STYLES[selectedTier.slug] || TIER_STYLES.free).gradient}`}>
-              <p className="font-semibold mb-2">{selectedTier.name} plan includes:</p>
-              <ul className="space-y-1.5">
-                {(selectedTier.highlights || []).map((h, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm">
-                    <Check className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
-                    <span>{h}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUpgradeOpen(false)}>Cancel</Button>
-            <Button onClick={handleUpgradeRequest}>
-              <Mail className="h-4 w-4 mr-2" />
-              Send Request
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </DashboardLayout>
   );
 };

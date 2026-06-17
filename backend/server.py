@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, Response, UploadFile, File, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
+import hashlib
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -51,6 +52,14 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', '')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
+
+# PayU payment gateway
+PAYU_KEY = os.environ.get('PAYU_KEY', '')
+PAYU_SALT = os.environ.get('PAYU_SALT', '')
+PAYU_ENV = os.environ.get('PAYU_ENV', 'test')
+PAYU_URL = "https://secure.payu.in/_payment" if PAYU_ENV == 'production' else "https://test.payu.in/_payment"
+
 _cors_env = os.environ.get('CORS_ORIGINS', '')
 CORS_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()] or [FRONTEND_URL, 'http://localhost:3000']
 
@@ -131,6 +140,8 @@ class SubscriptionTier(BaseModel):
     description: str = ""
     sort_order: int = 0
     is_default: bool = False
+    price_monthly: float = 0.0
+    currency: str = "INR"
     limits: dict = Field(default_factory=lambda: {
         "max_users": 3,
         "max_assets": 10,
@@ -147,6 +158,8 @@ class SubscriptionTierCreate(BaseModel):
     description: str = ""
     sort_order: int = 0
     is_default: bool = False
+    price_monthly: float = 0.0
+    currency: str = "INR"
     limits: dict = Field(default_factory=lambda: {
         "max_users": 3,
         "max_assets": 10,
@@ -161,6 +174,8 @@ class SubscriptionTierUpdate(BaseModel):
     description: Optional[str] = None
     sort_order: Optional[int] = None
     is_default: Optional[bool] = None
+    price_monthly: Optional[float] = None
+    currency: Optional[str] = None
     limits: Optional[dict] = None
     allowed_features: Optional[List[str]] = None
     highlights: Optional[List[str]] = None
@@ -2709,6 +2724,8 @@ async def seed_default_tiers():
             "description": "Get started with basic IT asset management",
             "sort_order": 0,
             "is_default": True,
+            "price_monthly": 0.0,
+            "currency": "INR",
             "limits": {
                 "max_users": 3,
                 "max_assets": 10,
@@ -2726,6 +2743,8 @@ async def seed_default_tiers():
             "description": "For growing teams that need full IT lifecycle management",
             "sort_order": 1,
             "is_default": False,
+            "price_monthly": 999.0,
+            "currency": "INR",
             "limits": {
                 "max_users": 25,
                 "max_assets": 100,
@@ -2743,6 +2762,8 @@ async def seed_default_tiers():
             "description": "Full-featured platform for large organizations",
             "sort_order": 2,
             "is_default": False,
+            "price_monthly": 2999.0,
+            "currency": "INR",
             "limits": {
                 "max_users": -1,
                 "max_assets": -1,
@@ -2935,6 +2956,136 @@ async def update_invoice(invoice_id: str, update: InvoiceUpdate, current_user: U
     if update_data:
         await db.invoices.update_one({"id": invoice_id}, {"$set": update_data})
     return await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+# ── PayU Payment Endpoints ────────────────────────────────────────────────────
+
+def _payu_request_hash(key, txnid, amount, productinfo, firstname, email, salt, udf1='', udf2='', udf3='', udf4='', udf5=''):
+    s = f"{key}|{txnid}|{amount}|{productinfo}|{firstname}|{email}|{udf1}|{udf2}|{udf3}|{udf4}|{udf5}||||||{salt}"
+    return hashlib.sha512(s.encode('utf-8')).hexdigest()
+
+def _payu_response_hash(salt, status, txnid, amount, productinfo, firstname, email, key, udf1='', udf2='', udf3='', udf4='', udf5=''):
+    s = f"{salt}|{status}||||||{udf5}|{udf4}|{udf3}|{udf2}|{udf1}|{email}|{firstname}|{productinfo}|{amount}|{txnid}|{key}"
+    return hashlib.sha512(s.encode('utf-8')).hexdigest()
+
+@api_router.post("/payments/initiate")
+async def initiate_payment(request: Request, current_user: User = Depends(get_current_user)):
+    body = await request.json()
+    tier_id = body.get('tier_id')
+    if not tier_id:
+        raise HTTPException(status_code=400, detail="tier_id is required")
+
+    tier = await db.subscription_tiers.find_one({"id": tier_id}, {"_id": 0})
+    if not tier:
+        raise HTTPException(status_code=404, detail="Tier not found")
+
+    price = tier.get('price_monthly', 0.0)
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="This plan is free — no payment needed")
+
+    if not PAYU_KEY or not PAYU_SALT:
+        raise HTTPException(status_code=503, detail="Payment gateway not configured")
+
+    txnid = str(uuid.uuid4()).replace('-', '')[:20]
+    amount = f"{price:.2f}"
+    productinfo = f"{tier['name']} Plan"
+    name_parts = (current_user.name or current_user.email).split()
+    firstname = name_parts[0] if name_parts else current_user.email.split('@')[0]
+    email = current_user.email
+
+    now = datetime.now(timezone.utc)
+    invoice_id = str(uuid.uuid4())
+    invoice_data = {
+        "id": invoice_id,
+        "tenant_id": current_user.tenant_id,
+        "user_id": current_user.id,
+        "tier_id": tier_id,
+        "tier_name": tier['name'],
+        "amount": price,
+        "currency": tier.get('currency', 'INR'),
+        "status": "pending",
+        "txn_id": txnid,
+        "payu_txn_id": "",
+        "description": f"{tier['name']} Plan - Monthly Subscription",
+        "period_start": now.isoformat(),
+        "period_end": (now + timedelta(days=30)).isoformat(),
+        "paid_at": None,
+        "created_at": now.isoformat(),
+    }
+    await db.invoices.insert_one(invoice_data)
+
+    hash_val = _payu_request_hash(PAYU_KEY, txnid, amount, productinfo, firstname, email, PAYU_SALT, udf1=invoice_id, udf2=current_user.tenant_id)
+
+    return {
+        "payu_url": PAYU_URL,
+        "params": {
+            "key": PAYU_KEY,
+            "txnid": txnid,
+            "amount": amount,
+            "productinfo": productinfo,
+            "firstname": firstname,
+            "email": email,
+            "phone": "",
+            "surl": f"{BACKEND_URL}/api/payments/success",
+            "furl": f"{BACKEND_URL}/api/payments/failure",
+            "hash": hash_val,
+            "udf1": invoice_id,
+            "udf2": current_user.tenant_id,
+            "udf3": "",
+            "udf4": "",
+            "udf5": "",
+        }
+    }
+
+@api_router.post("/payments/success")
+async def payment_success(request: Request):
+    form = await request.form()
+    data = dict(form)
+
+    status_val = data.get('status', '')
+    txnid = data.get('txnid', '')
+    amount = data.get('amount', '')
+    productinfo = data.get('productinfo', '')
+    firstname = data.get('firstname', '')
+    email = data.get('email', '')
+    payu_hash = data.get('hash', '')
+    udf1 = data.get('udf1', '')   # invoice_id
+    udf2 = data.get('udf2', '')   # tenant_id
+    mihpayid = data.get('mihpayid', '')
+
+    expected = _payu_response_hash(PAYU_SALT, status_val, txnid, amount, productinfo, firstname, email, PAYU_KEY, udf1=udf1, udf2=udf2)
+    if payu_hash != expected:
+        return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=tampered", status_code=302)
+
+    if status_val == 'Success':
+        await db.invoices.update_one(
+            {"id": udf1},
+            {"$set": {"status": "paid", "payu_txn_id": mihpayid, "paid_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        invoice = await db.invoices.find_one({"id": udf1}, {"_id": 0})
+        if invoice:
+            tier = await db.subscription_tiers.find_one({"id": invoice['tier_id']}, {"_id": 0})
+            if tier:
+                await db.tenants.update_one(
+                    {"id": udf2},
+                    {"$set": {
+                        "subscription_tier_id": invoice['tier_id'],
+                        "subscription_started_at": datetime.now(timezone.utc).isoformat(),
+                        "enabled_features": tier.get('allowed_features', [])
+                    }}
+                )
+        return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=success", status_code=302)
+    else:
+        await db.invoices.update_one({"id": udf1}, {"$set": {"status": "failed"}})
+        return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=failed", status_code=302)
+
+@api_router.post("/payments/failure")
+async def payment_failure(request: Request):
+    form = await request.form()
+    data = dict(form)
+    udf1 = data.get('udf1', '')
+    if udf1:
+        await db.invoices.update_one({"id": udf1}, {"$set": {"status": "failed"}})
+    return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=failed", status_code=302)
 
 # ── DELETE endpoints ──────────────────────────────────────────────────────────
 
@@ -4859,6 +5010,7 @@ async def startup_db_client():
     await db.api_keys.create_index("key", unique=True, background=True)
     await db.invoices.create_index("tenant_id", background=True)
     await db.invoices.create_index("created_at", background=True)
+    await db.invoices.create_index("txn_id", background=True)
     await db.asset_documents.create_index("asset_id", background=True)
     await db.amc_contracts.create_index("asset_id", background=True)
     await db.amc_contracts.create_index("tenant_id", background=True)
@@ -4866,6 +5018,13 @@ async def startup_db_client():
     await db.invite_tokens.create_index("token", background=True)
     await db.invite_tokens.create_index("email", background=True)
     await seed_default_tiers()
+    # Patch prices onto existing tiers that pre-date the price_monthly field
+    tier_prices = {"tier-free": 0.0, "tier-pro": 999.0, "tier-enterprise": 2999.0}
+    for tier_id, price in tier_prices.items():
+        await db.subscription_tiers.update_one(
+            {"id": tier_id, "price_monthly": {"$exists": False}},
+            {"$set": {"price_monthly": price, "currency": "INR"}}
+        )
     asyncio.create_task(run_scheduled_alerts())
     logger.info("Database indexes created, default tiers seeded, and alert scheduler started.")
 
