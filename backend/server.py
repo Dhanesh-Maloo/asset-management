@@ -61,7 +61,11 @@ PAYU_ENV = os.environ.get('PAYU_ENV', 'test')
 PAYU_URL = "https://secure.payu.in/_payment" if PAYU_ENV == 'production' else "https://test.payu.in/_payment"
 
 _cors_env = os.environ.get('CORS_ORIGINS', '')
-CORS_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()] or [FRONTEND_URL, 'http://localhost:3000', 'https://asset-management-delta-ochre.vercel.app']
+CORS_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()] or [FRONTEND_URL, 'http://localhost:3000']
+# Always allow the production Vercel deployment regardless of env var
+for _vercel_origin in ['https://asset-management-delta-ochre.vercel.app', 'http://localhost:3000']:
+    if _vercel_origin not in CORS_ORIGINS:
+        CORS_ORIGINS.append(_vercel_origin)
 
 # Google OAuth (direct) configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -4970,6 +4974,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
