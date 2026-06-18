@@ -1,6 +1,9 @@
 {
   "buildCommand": "yarn build",
   "outputDirectory": "build",
+  "env": {
+    "REACT_APP_BACKEND_URL": "https://asset-management-production-2c53.up.railway.app"
+  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

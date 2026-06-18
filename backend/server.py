@@ -61,7 +61,7 @@ PAYU_ENV = os.environ.get('PAYU_ENV', 'test')
 PAYU_URL = "https://secure.payu.in/_payment" if PAYU_ENV == 'production' else "https://test.payu.in/_payment"
 
 _cors_env = os.environ.get('CORS_ORIGINS', '')
-CORS_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()] or [FRONTEND_URL, 'http://localhost:3000']
+CORS_ORIGINS = [o.strip() for o in _cors_env.split(',') if o.strip()] or [FRONTEND_URL, 'http://localhost:3000', 'https://asset-management-delta-ochre.vercel.app']
 
 # Google OAuth (direct) configuration
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
