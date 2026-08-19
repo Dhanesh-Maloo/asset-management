@@ -332,6 +332,9 @@ class Order(BaseModel):
     approved_by: Optional[str] = None
     approval_date: Optional[str] = None
     rejection_reason: str = ""
+    dispatched_asset_id: Optional[str] = None
+    dispatched_at: Optional[str] = None
+    dispatched_by: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class OrderCreate(BaseModel):
@@ -341,6 +344,9 @@ class OrderCreate(BaseModel):
 
 class OrderUpdate(BaseModel):
     status: OrderStatus
+
+class OrderDispatch(BaseModel):
+    asset_id: Optional[str] = None
 
 class Asset(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -742,6 +748,11 @@ class BulkAssetUpdate(BaseModel):
     status: Optional[AssetStatus] = None
     location: Optional[str] = None
     department_id: Optional[str] = None
+
+class BulkAssetDispatch(BaseModel):
+    ids: List[str]
+    assigned_to: str
+    notes: str = Field("", max_length=1000)
 
 class AssetDispose(BaseModel):
     disposal_method: str = Field(..., description="sold, scrapped, donated, or other")
@@ -2076,6 +2087,7 @@ async def get_assets(
     search: Optional[str] = Query(None, description="Search by name or serial number"),
     is_demo: Optional[bool] = Query(None, description="Filter demo assets"),
     department_id: Optional[str] = Query(None, description="Filter by department"),
+    product_id: Optional[str] = Query(None, description="Filter by product"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Results per page")
 ):
@@ -2095,6 +2107,8 @@ async def get_assets(
         query["is_demo"] = is_demo
     if department_id:
         query["department_id"] = department_id
+    if product_id:
+        query["product_id"] = product_id
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -2504,6 +2518,110 @@ async def reject_order(order_id: str, rejection_reason: str, current_user: User 
     )
     await db.approval_history.insert_one(history.model_dump())
     
+    updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return Order(**updated_order)
+
+@api_router.get("/orders/{order_id}/available-units", response_model=List[Asset])
+async def get_order_available_units(order_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if current_user.role != UserRole.SUPER_ADMIN and order["tenant_id"] != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    units = await db.assets.find({
+        "tenant_id": order["tenant_id"],
+        "product_id": order["product_id"],
+        "status": AssetStatus.AVAILABLE,
+        "is_deleted": {"$ne": True}
+    }, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return [Asset(**u) for u in units]
+
+@api_router.post("/orders/{order_id}/dispatch", response_model=Order)
+async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: User = Depends(get_current_user)):
+    """Hand a specific in-store asset unit to the employee behind an approved order."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if current_user.role != UserRole.SUPER_ADMIN and order["tenant_id"] != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if order["status"] != OrderStatus.APPROVED:
+        raise HTTPException(status_code=400, detail="Only approved orders can be dispatched")
+    if order.get("dispatched_asset_id"):
+        raise HTTPException(status_code=400, detail="Order has already been dispatched")
+
+    base_filter = {
+        "tenant_id": order["tenant_id"],
+        "product_id": order["product_id"],
+        "status": AssetStatus.AVAILABLE,
+        "is_deleted": {"$ne": True}
+    }
+
+    if dispatch.asset_id:
+        # Atomically claim the requested unit — fails if another dispatch beat us to it
+        asset = await db.assets.find_one_and_update(
+            {**base_filter, "id": dispatch.asset_id},
+            {"$set": {
+                "assigned_to": order["user_id"],
+                "assigned_date": datetime.now(timezone.utc).isoformat(),
+                "status": AssetStatus.ASSIGNED
+            }},
+            return_document=True,
+            projection={"_id": 0}
+        )
+        if asset is None:
+            raise HTTPException(status_code=409, detail="Selected unit is no longer available in store")
+    else:
+        # Auto-pick the oldest available unit of this product
+        candidate = await db.assets.find_one(base_filter, {"_id": 0}, sort=[("created_at", 1)])
+        if candidate is None:
+            raise HTTPException(status_code=409, detail="No available units in store for this product")
+        asset = await db.assets.find_one_and_update(
+            {**base_filter, "id": candidate["id"]},
+            {"$set": {
+                "assigned_to": order["user_id"],
+                "assigned_date": datetime.now(timezone.utc).isoformat(),
+                "status": AssetStatus.ASSIGNED
+            }},
+            return_document=True,
+            projection={"_id": 0}
+        )
+        if asset is None:
+            raise HTTPException(status_code=409, detail="No available units in store for this product")
+
+    history = AssetHistory(
+        asset_id=asset["id"],
+        action="dispatched",
+        performed_by=current_user.id,
+        notes=f"Dispatched from store against Order {order_id[:8]}"
+    )
+    await db.asset_history.insert_one(history.model_dump())
+
+    update_data = {
+        "status": OrderStatus.FULFILLED,
+        "dispatched_asset_id": asset["id"],
+        "dispatched_at": datetime.now(timezone.utc).isoformat(),
+        "dispatched_by": current_user.id
+    }
+    await db.orders.update_one({"id": order_id}, {"$set": update_data})
+
+    recipient = await db.users.find_one({"id": order["user_id"]}, {"_id": 0, "email": 1, "name": 1})
+    if recipient and recipient.get("email"):
+        product = await db.products.find_one({"id": order["product_id"]}, {"_id": 0, "name": 1})
+        product_name = product["name"] if product else "your item"
+        await send_alert_email(
+            recipient["email"],
+            f"📦 {product_name} Dispatched",
+            [f"Unit {asset.get('asset_tag', asset['id'][:8])} (S/N: {asset.get('serial_number', 'N/A')}) has been dispatched to you."],
+            "Your order has been fulfilled and dispatched from store:"
+        )
+
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
 
@@ -3927,6 +4045,55 @@ async def bulk_update_assets(body: BulkAssetUpdate, current_user: User = Depends
     result = await db.assets.update_many(query, {"$set": updates})
     await write_audit_log(current_user.id, "bulk_update", "assets", ",".join(body.ids), f"{result.modified_count} assets updated")
     return {"updated": result.modified_count}
+
+@api_router.post("/assets/bulk-dispatch")
+async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Depends(get_current_user_hybrid)):
+    """Dispatch multiple in-store (available) asset units to one employee in a single action."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="No asset IDs provided")
+
+    query = {"id": {"$in": body.ids}, "is_deleted": {"$ne": True}}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+
+    assets = await db.assets.find(query, {"_id": 0}).to_list(len(body.ids))
+    found_ids = {a["id"] for a in assets}
+    missing = [i for i in body.ids if i not in found_ids]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Assets not found: {', '.join(missing)}")
+    not_available = [a["asset_tag"] for a in assets if a["status"] != AssetStatus.AVAILABLE]
+    if not_available:
+        raise HTTPException(status_code=409, detail=f"Not in store (already dispatched/unavailable): {', '.join(not_available)}")
+
+    recipient = await db.users.find_one({"id": body.assigned_to}, {"_id": 0, "email": 1, "name": 1})
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient user not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.assets.update_many(
+        {"id": {"$in": body.ids}},
+        {"$set": {"assigned_to": body.assigned_to, "assigned_date": now, "status": AssetStatus.ASSIGNED}}
+    )
+
+    history_note = f"Dispatched from store to {recipient.get('name', body.assigned_to)}" + (f" — {body.notes}" if body.notes else "")
+    await db.asset_history.insert_many([
+        AssetHistory(asset_id=a["id"], action="dispatched", performed_by=current_user.id, notes=history_note).model_dump()
+        for a in assets
+    ])
+    await write_audit_log(current_user.id, "bulk_dispatch", "assets", ",".join(body.ids), f"{result.modified_count} assets dispatched to {body.assigned_to}")
+
+    if recipient.get("email"):
+        tags = ", ".join(a["asset_tag"] for a in assets)
+        await send_alert_email(
+            recipient["email"],
+            "📦 Assets Dispatched to You",
+            [f"{result.modified_count} unit(s) dispatched: {tags}"],
+            "The following assets have been dispatched to you from store:"
+        )
+
+    return {"dispatched": result.modified_count}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ASSET PHOTO UPLOAD

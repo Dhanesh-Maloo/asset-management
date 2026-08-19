@@ -9,8 +9,9 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { CheckCircle, XCircle, Package as PackageIcon, UserCheck, UserCog, ArrowRight, Trash2, Download, ShoppingCart } from 'lucide-react';
+import { CheckCircle, XCircle, Package as PackageIcon, UserCheck, UserCog, ArrowRight, Trash2, Download, ShoppingCart, Truck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -29,6 +30,12 @@ const Orders = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderToDelete, setOrderToDelete] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
+  const [dispatchOrder, setDispatchOrder] = useState(null);
+  const [availableUnits, setAvailableUnits] = useState([]);
+  const [selectedUnitId, setSelectedUnitId] = useState('');
+  const [dispatching, setDispatching] = useState(false);
+  const [loadingUnits, setLoadingUnits] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -105,13 +112,37 @@ const Orders = () => {
     }
   };
 
-  const handleFulfill = async (orderId) => {
+  const openDispatchDialog = async (order) => {
+    setDispatchOrder(order);
+    setSelectedUnitId('');
+    setDispatchDialogOpen(true);
+    setLoadingUnits(true);
     try {
-      await axios.patch(`${API}/orders/${orderId}`, { status: 'fulfilled' });
-      toast.success('Order marked as fulfilled');
+      const res = await axios.get(`${API}/orders/${order.id}/available-units`);
+      setAvailableUnits(res.data);
+    } catch (error) {
+      toast.error('Failed to load available units in store');
+      setAvailableUnits([]);
+    } finally {
+      setLoadingUnits(false);
+    }
+  };
+
+  const handleDispatch = async () => {
+    if (!dispatchOrder) return;
+    setDispatching(true);
+    try {
+      await axios.post(`${API}/orders/${dispatchOrder.id}/dispatch`, {
+        asset_id: selectedUnitId || null
+      });
+      toast.success('Unit dispatched from store');
+      setDispatchDialogOpen(false);
+      setDispatchOrder(null);
       fetchData();
     } catch (error) {
-      toast.error('Failed to fulfill order');
+      toast.error(error.response?.data?.detail || 'Failed to dispatch unit');
+    } finally {
+      setDispatching(false);
     }
   };
 
@@ -191,16 +222,17 @@ const Orders = () => {
       return null;
     }
 
-    // Approved order - can fulfill
-    if (order.status === 'approved' && isApprover) {
+    // Approved order - dispatch a real unit from store
+    if (order.status === 'approved' && isChecker) {
       return (
-        <Button 
-          size="sm" 
-          variant="outline"
-          onClick={() => handleFulfill(order.id)}
-          data-testid={`fulfill-btn-${order.id}`}
+        <Button
+          size="sm"
+          className="bg-violet-600 hover:bg-violet-700"
+          onClick={() => openDispatchDialog(order)}
+          data-testid={`dispatch-btn-${order.id}`}
         >
-          Mark Fulfilled
+          <Truck className="h-4 w-4 mr-1" />
+          Dispatch
         </Button>
       );
     }
@@ -436,6 +468,56 @@ const Orders = () => {
             <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleReject} data-testid="confirm-reject-btn">
               Confirm Rejection
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Dispatch Dialog */}
+      <Dialog open={dispatchDialogOpen} onOpenChange={setDispatchDialogOpen}>
+        <DialogContent data-testid="dispatch-order-dialog">
+          <DialogHeader>
+            <DialogTitle>Dispatch from Store</DialogTitle>
+            <DialogDescription>
+              Hand over a specific in-store unit of <strong>{products[dispatchOrder?.product_id]?.name}</strong> to{' '}
+              <strong>{users[dispatchOrder?.user_id]?.name || 'the requester'}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {loadingUnits ? (
+              <div className="h-10 shimmer rounded-md" />
+            ) : availableUnits.length === 0 ? (
+              <p className="text-sm text-destructive">
+                No units of this product are currently available in store.
+              </p>
+            ) : (
+              <div>
+                <Label htmlFor="dispatch_unit">Unit to Dispatch</Label>
+                <Select value={selectedUnitId} onValueChange={setSelectedUnitId}>
+                  <SelectTrigger id="dispatch_unit" data-testid="dispatch-unit-select">
+                    <SelectValue placeholder="Auto-select oldest available unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableUnits.map((unit) => (
+                      <SelectItem key={unit.id} value={unit.id}>
+                        {unit.asset_tag} — S/N {unit.serial_number}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave unselected to auto-dispatch the oldest available unit.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDispatchDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleDispatch}
+              disabled={dispatching || loadingUnits || availableUnits.length === 0}
+              data-testid="confirm-dispatch-btn"
+            >
+              {dispatching ? 'Dispatching...' : 'Confirm Dispatch'}
             </Button>
           </DialogFooter>
         </DialogContent>

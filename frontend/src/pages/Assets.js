@@ -365,6 +365,10 @@ const Assets = () => {
   const [bulkStatus, setBulkStatus] = useState('');
   const [bulkLocation, setBulkLocation] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkDispatchOpen, setBulkDispatchOpen] = useState(false);
+  const [bulkDispatchUserId, setBulkDispatchUserId] = useState('');
+  const [bulkDispatchNotes, setBulkDispatchNotes] = useState('');
+  const [bulkDispatching, setBulkDispatching] = useState(false);
 
   const toggleSelect = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const toggleAll = () => setSelectedIds(prev => prev.length === assets.length ? [] : assets.map(a => a.id));
@@ -385,6 +389,28 @@ const Assets = () => {
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || 'Bulk update failed'); }
     finally { setBulkSaving(false); }
+  };
+
+  const selectedAssetsForDispatch = assets.filter(a => selectedIds.includes(a.id));
+  const allSelectedAvailable = selectedAssetsForDispatch.length > 0 && selectedAssetsForDispatch.every(a => a.status === 'available');
+
+  const handleBulkDispatch = async () => {
+    if (!bulkDispatchUserId) { toast.error('Select a recipient'); return; }
+    setBulkDispatching(true);
+    try {
+      const res = await axios.post(`${API}/assets/bulk-dispatch`, {
+        ids: selectedIds,
+        assigned_to: bulkDispatchUserId,
+        notes: bulkDispatchNotes
+      });
+      toast.success(`${res.data.dispatched} unit(s) dispatched from store`);
+      setSelectedIds([]);
+      setBulkDispatchOpen(false);
+      setBulkDispatchUserId('');
+      setBulkDispatchNotes('');
+      fetchData();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Dispatch failed'); }
+    finally { setBulkDispatching(false); }
   };
 
   return (
@@ -441,6 +467,12 @@ const Assets = () => {
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors">
                 <Printer className="h-3.5 w-3.5" /> Print Labels
               </button>
+              {allSelectedAvailable && (
+                <button onClick={() => setBulkDispatchOpen(true)} data-testid="bulk-dispatch-btn"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white text-sm font-medium rounded-md hover:bg-violet-700 transition-colors">
+                  <UserPlus className="h-3.5 w-3.5" /> Dispatch
+                </button>
+              )}
               <button onClick={() => setSelectedIds([])}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors ml-auto">
                 Clear selection
@@ -900,6 +932,44 @@ const Assets = () => {
             <Button variant="outline" onClick={() => setBulkEditOpen(false)}>Cancel</Button>
             <Button onClick={handleBulkUpdate} disabled={bulkSaving}>
               {bulkSaving ? 'Saving...' : 'Apply to All Selected'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Bulk Dispatch Dialog */}
+      <Dialog open={bulkDispatchOpen} onOpenChange={setBulkDispatchOpen}>
+        <DialogContent data-testid="bulk-dispatch-dialog">
+          <DialogHeader>
+            <DialogTitle>Dispatch {selectedIds.length} Unit(s) from Store</DialogTitle>
+            <DialogDescription>
+              Hand over the selected in-store units to an employee
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Recipient</Label>
+              <Select value={bulkDispatchUserId} onValueChange={setBulkDispatchUserId}>
+                <SelectTrigger data-testid="bulk-dispatch-user-select">
+                  <SelectValue placeholder="Select a user" />
+                </SelectTrigger>
+                <SelectContent>
+                  {users.map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name} ({u.email})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Notes (optional)</Label>
+              <Input value={bulkDispatchNotes} onChange={e => setBulkDispatchNotes(e.target.value)} placeholder="e.g. Handed over at Reception" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDispatchOpen(false)}>Cancel</Button>
+            <Button onClick={handleBulkDispatch} disabled={bulkDispatching} data-testid="confirm-bulk-dispatch-btn">
+              {bulkDispatching ? 'Dispatching...' : 'Confirm Dispatch'}
             </Button>
           </DialogFooter>
         </DialogContent>
