@@ -323,6 +323,14 @@ const Assets = () => {
 
   const handleAddAsset = async (e) => {
     e.preventDefault();
+    if (!assetForm.location.trim()) {
+      toast.error('Location is required');
+      return;
+    }
+    if (!assetForm.purchase_date) {
+      toast.error('Purchase date is required');
+      return;
+    }
     try {
       await axios.post(`${API}/assets`, {
         ...assetForm,
@@ -714,7 +722,7 @@ const Assets = () => {
               <SelectContent>
                 {users.map(u => (
                   <SelectItem key={u.id} value={u.id}>
-                    {u.name} ({u.email})
+                    {u.name}{u.employee_id ? ` [${u.employee_id}]` : ''} ({u.email})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -793,8 +801,8 @@ const Assets = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="asset-location">Location</Label>
-                <Input id="asset-location" value={assetForm.location} onChange={(e) => setAssetForm({ ...assetForm, location: e.target.value })} placeholder="Office A, Floor 2" maxLength={200} data-testid="asset-location-input" />
+                <Label htmlFor="asset-location">Location *</Label>
+                <Input id="asset-location" value={assetForm.location} onChange={(e) => setAssetForm({ ...assetForm, location: e.target.value })} placeholder="Office A, Floor 2" required maxLength={200} data-testid="asset-location-input" />
               </div>
               <div>
                 <Label htmlFor="asset-price">Purchase Price</Label>
@@ -803,8 +811,8 @@ const Assets = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="asset-purchase-date">Purchase Date</Label>
-                <Input id="asset-purchase-date" type="date" value={assetForm.purchase_date} onChange={(e) => setAssetForm({ ...assetForm, purchase_date: e.target.value })} />
+                <Label htmlFor="asset-purchase-date">Purchase Date *</Label>
+                <Input id="asset-purchase-date" type="date" value={assetForm.purchase_date} onChange={(e) => setAssetForm({ ...assetForm, purchase_date: e.target.value })} required data-testid="asset-purchase-date-input" />
               </div>
               <div>
                 <Label htmlFor="asset-expiry-date">Expiry Date</Label>

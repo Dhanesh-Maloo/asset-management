@@ -68,7 +68,7 @@ export const NAV_GROUPS = [
   {
     label: 'Administration',
     items: [
-      { name: 'Users', href: '/users', icon: Users, roles: ['super_admin', 'tenant_admin'], feature: 'users' },
+      { name: 'Employees', href: '/users', icon: Users, roles: ['super_admin', 'tenant_admin'], feature: 'users' },
       { name: 'Groups', href: '/groups', icon: UserCog, roles: ['super_admin', 'tenant_admin'], feature: 'groups' },
       { name: 'Workflows', href: '/workflows', icon: GitBranch, roles: ['super_admin', 'tenant_admin'], feature: 'workflows' },
       { name: 'Tenants', href: '/tenants', icon: Building2, roles: ['super_admin'], feature: null },

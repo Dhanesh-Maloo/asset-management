@@ -223,6 +223,9 @@ class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     email: EmailStr
     name: str
+    first_name: str = ""
+    last_name: str = ""
+    employee_id: Optional[str] = None
     role: UserRole
     tenant_id: Optional[str] = None
     group_id: Optional[str] = None
@@ -234,7 +237,9 @@ class User(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
-    name: str
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    employee_id: Optional[str] = Field(None, max_length=50)
     role: UserRole
     tenant_id: Optional[str] = None
     group_id: Optional[str] = None
@@ -403,8 +408,8 @@ class AssetCreate(BaseModel):
     product_id: str
     serial_number: str = Field(..., min_length=1, max_length=100)
     tenant_id: str
-    location: str = Field("", max_length=200)
-    purchase_date: Optional[str] = None
+    location: str = Field(..., min_length=1, max_length=200)
+    purchase_date: str = Field(..., min_length=1)
     warranty_start_date: Optional[str] = None
     warranty_end_date: Optional[str] = None
     warranty_provider: str = ""
@@ -1527,15 +1532,27 @@ async def register(user_data: UserCreate):
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
+    if user_data.employee_id and user_data.employee_id.strip() and user_data.tenant_id:
+        existing_emp_id = await db.users.find_one(
+            {"tenant_id": user_data.tenant_id, "employee_id": user_data.employee_id.strip()},
+            {"_id": 0, "id": 1},
+        )
+        if existing_emp_id:
+            raise HTTPException(status_code=400, detail="Employee ID already in use")
+
     if user_data.tenant_id:
         await check_tier_limit(user_data.tenant_id, "users")
-    
+
     hashed_password = hash_password(user_data.password)
     user_dict = user_data.model_dump()
     user_dict.pop("password")
+    user_dict["first_name"] = user_dict["first_name"].strip()
+    user_dict["last_name"] = user_dict["last_name"].strip()
+    user_dict["employee_id"] = (user_dict.get("employee_id") or "").strip() or None
+    user_dict["name"] = f"{user_dict['first_name']} {user_dict['last_name']}".strip()
     user = User(**user_dict)
-    
+
     doc = user.model_dump()
     doc["password_hash"] = hashed_password
     await db.users.insert_one(doc)
@@ -1808,6 +1825,16 @@ async def create_product(product_data: ProductCreate, current_user: User = Depen
     existing = await db.products.find_one(duplicate_query, {"_id": 0, "name": 1})
     if existing:
         raise HTTPException(status_code=409, detail=f"A product named '{existing['name']}' already exists. Please use a different name.")
+
+    # Prices are stored canonically in USD. If the tenant's base currency isn't USD,
+    # the price entered in the form is in that currency — convert it to USD for storage.
+    if scope_tenant_id:
+        tenant = await db.tenants.find_one({"id": scope_tenant_id}, {"_id": 0})
+        tenant_currency = tenant.get("settings", {}).get("currency") if tenant else None
+        if tenant_currency and tenant_currency != "USD":
+            conversion_rates = await get_exchange_rates()
+            rate = conversion_rates.get(tenant_currency, 1.0)
+            product_dict["price"] = round(product_dict["price"] / rate, 2)
 
     product = Product(**product_dict)
     await db.products.insert_one(product.model_dump())
@@ -5084,8 +5111,15 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
       </p>
       <p style="color:#888;font-size:12px">This link expires in 7 days. If you did not expect this invite, please ignore this email.</p>
     </div>"""
-    await _send_email(invite.email, "You're invited to join the Asset Management System", invite_html)
-    return {"message": "Invitation created", "token": invite.token, "invite_link": invite_link}
+    try:
+        email_sent = await _send_email(invite.email, "You're invited to join the Asset Management System", invite_html)
+    except Exception as e:
+        logging.error(f"Failed to send invite email to {invite.email}: {e}")
+        email_sent = False
+    response = {"message": "Invitation created", "token": invite.token, "invite_link": invite_link, "email_sent": email_sent}
+    if not email_sent:
+        response["message"] = "Invitation created, but the email could not be sent. Share the invite link manually."
+    return response
 
 
 @api_router.get("/auth/invite/{token}")

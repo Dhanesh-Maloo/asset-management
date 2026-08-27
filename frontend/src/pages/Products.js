@@ -45,6 +45,7 @@ const Products = () => {
   const [orderNotes, setOrderNotes] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState(null);
+  const [tenantCurrency, setTenantCurrency] = useState('USD');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -58,7 +59,19 @@ const Products = () => {
 
   useEffect(() => {
     fetchProducts();
+    fetchTenantCurrency();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const fetchTenantCurrency = async () => {
+    if (!user?.tenant_id) return;
+    try {
+      const res = await axios.get(`${API}/tenants/${user.tenant_id}`);
+      setTenantCurrency(res.data.settings?.currency || 'USD');
+    } catch (error) {
+      console.error('Failed to fetch tenant currency', error);
+    }
+  };
 
   useEffect(() => {
     filterProducts();
@@ -416,9 +429,9 @@ const Products = () => {
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <Label htmlFor="price">Price (USD) *</Label>
+                <Label htmlFor="price">Price ({tenantCurrency}) *</Label>
                 <Input id="price" type="number" step="0.01" min="0.01" value={formData.price || ''} onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })} placeholder="1299.99" required data-testid="product-price-input" />
-                <p className="text-xs text-muted-foreground mt-1">Must be greater than $0</p>
+                <p className="text-xs text-muted-foreground mt-1">Must be greater than {getCurrencySymbol(tenantCurrency)}0</p>
               </div>
               <div>
                 <Label htmlFor="stock">Stock Quantity *</Label>

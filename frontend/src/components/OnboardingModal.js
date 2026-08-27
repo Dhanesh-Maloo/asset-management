@@ -24,8 +24,8 @@ const STEPS = [
   {
     icon: Users,
     color: 'bg-purple-100 text-purple-600',
-    title: 'Invite a User',
-    description: 'Invite your team members so they can request orders and raise tickets.',
+    title: 'Add an Employee',
+    description: 'Add your team members so they can request orders and raise tickets.',
     href: '/users',
     key: 'user',
   },

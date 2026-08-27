@@ -35,7 +35,9 @@ const Users = () => {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    name: '',
+    first_name: '',
+    last_name: '',
+    employee_id: '',
     role: 'employee',
     tenant_id: '',
     group_id: ''
@@ -77,12 +79,12 @@ const Users = () => {
     e.preventDefault();
     try {
       await axios.post(`${API}/auth/register`, formData);
-      toast.success('User created successfully');
+      toast.success('Employee added successfully');
       setDialogOpen(false);
-      setFormData({ email: '', password: '', name: '', role: 'employee', tenant_id: '', group_id: '' });
+      setFormData({ email: '', password: '', first_name: '', last_name: '', employee_id: '', role: 'employee', tenant_id: '', group_id: '' });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to create user');
+      toast.error(error.response?.data?.detail || 'Failed to add employee');
     }
   };
 
@@ -92,7 +94,11 @@ const Users = () => {
     try {
       const res = await axios.post(`${API}/auth/invite`, inviteForm);
       setInviteResult(res.data);
-      toast.success('Invitation created!');
+      if (res.data.email_sent === false) {
+        toast.warning('Invitation created, but the email could not be sent. Share the link manually.');
+      } else {
+        toast.success('Invitation created!');
+      }
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to send invitation');
@@ -117,12 +123,12 @@ const Users = () => {
   const handleDeleteUser = async () => {
     try {
       await axios.delete(`${API}/users/${userToDelete.id}`);
-      toast.success(`User "${userToDelete.name}" deleted`);
+      toast.success(`Employee "${userToDelete.name}" deleted`);
       setDeleteDialogOpen(false);
       setUserToDelete(null);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to delete user');
+      toast.error(error.response?.data?.detail || 'Failed to delete employee');
     }
   };
 
@@ -150,27 +156,27 @@ const Users = () => {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold font-heading tracking-tight mb-1">
-              User Management
+              Employee Management
             </h1>
             <p className="text-sm text-muted-foreground">
-              Manage user accounts and permissions
+              Manage employee records and permissions
             </p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => { setInviteForm({ email: '', role: 'employee' }); setInviteResult(null); setInviteDialogOpen(true); }}>
               <Mail className="h-4 w-4 mr-2" />
-              Invite User
+              Invite Employee
             </Button>
             <Button onClick={() => setDialogOpen(true)} data-testid="create-user-btn">
               <Plus className="h-4 w-4 mr-2" />
-              Add User
+              Add Employee
             </Button>
           </div>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>All Users</CardTitle>
+            <CardTitle>All Employees</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -182,13 +188,14 @@ const Users = () => {
             ) : users.length === 0 ? (
               <div className="text-center py-12">
                 <UsersIcon className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No users found</p>
+                <p className="text-muted-foreground">No employees found</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Employee ID</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Role</TableHead>
@@ -201,6 +208,7 @@ const Users = () => {
                   <TableBody>
                     {users.map((u) => (
                       <TableRow key={u.id} data-testid={`user-row-${u.id}`}>
+                        <TableCell className="text-sm text-muted-foreground">{u.employee_id || '-'}</TableCell>
                         <TableCell className="font-medium">{u.name}</TableCell>
                         <TableCell>{u.email}</TableCell>
                         <TableCell>{getRoleBadge(u.role)}</TableCell>
@@ -276,7 +284,7 @@ const Users = () => {
       <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) { setInviteResult(null); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Invite User</DialogTitle>
+            <DialogTitle>Invite Employee</DialogTitle>
             <DialogDescription>Send an email invitation to join the system</DialogDescription>
           </DialogHeader>
           {inviteResult ? (
@@ -346,18 +354,43 @@ const Users = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="create-user-dialog">
           <DialogHeader>
-            <DialogTitle>Add New User</DialogTitle>
-            <DialogDescription>Create a new user account</DialogDescription>
+            <DialogTitle>Add New Employee</DialogTitle>
+            <DialogDescription>Add a new employee to the system</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="first-name">First Name</Label>
+                <Input
+                  id="first-name"
+                  value={formData.first_name}
+                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                  required
+                  maxLength={100}
+                  data-testid="user-first-name-input"
+                />
+              </div>
+              <div>
+                <Label htmlFor="last-name">Last Name</Label>
+                <Input
+                  id="last-name"
+                  value={formData.last_name}
+                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                  required
+                  maxLength={100}
+                  data-testid="user-last-name-input"
+                />
+              </div>
+            </div>
             <div>
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="employee-id">Employee ID</Label>
               <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
-                data-testid="user-name-input"
+                id="employee-id"
+                value={formData.employee_id}
+                onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
+                placeholder="EMP-001"
+                maxLength={50}
+                data-testid="user-employee-id-input"
               />
             </div>
             <div>
@@ -428,7 +461,7 @@ const Users = () => {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button type="submit" data-testid="submit-user-btn">Create User</Button>
+              <Button type="submit" data-testid="submit-user-btn">Add Employee</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -438,7 +471,7 @@ const Users = () => {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent data-testid="delete-user-dialog">
           <DialogHeader>
-            <DialogTitle className="text-red-600">Delete User</DialogTitle>
+            <DialogTitle className="text-red-600">Delete Employee</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete <span className="font-semibold">{userToDelete?.name}</span> ({userToDelete?.email})? This action cannot be undone.
             </DialogDescription>
@@ -447,7 +480,7 @@ const Users = () => {
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteUser} data-testid="confirm-delete-user-btn">
               <Trash2 className="h-4 w-4 mr-2" />
-              Delete User
+              Delete Employee
             </Button>
           </DialogFooter>
         </DialogContent>
