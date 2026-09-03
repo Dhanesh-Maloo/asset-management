@@ -334,6 +334,7 @@ const Assets = () => {
     try {
       await axios.post(`${API}/assets`, {
         ...assetForm,
+        purchase_price: assetForm.purchase_price === '' ? 0 : assetForm.purchase_price,
         tenant_id: user.tenant_id || assetForm.tenant_id || 'default'
       });
       toast.success('Asset added successfully');
@@ -806,7 +807,7 @@ const Assets = () => {
               </div>
               <div>
                 <Label htmlFor="asset-price">Purchase Price</Label>
-                <Input id="asset-price" type="number" step="0.01" min="0" value={assetForm.purchase_price} onChange={(e) => setAssetForm({ ...assetForm, purchase_price: parseFloat(e.target.value) || 0 })} data-testid="asset-price-input" />
+                <Input id="asset-price" type="number" step="0.01" min="0" value={assetForm.purchase_price} onChange={(e) => { const v = e.target.value; setAssetForm({ ...assetForm, purchase_price: v === '' ? '' : parseFloat(v) || 0 }); }} data-testid="asset-price-input" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
