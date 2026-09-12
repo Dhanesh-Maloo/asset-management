@@ -78,7 +78,12 @@ const Users = () => {
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API}/auth/register`, formData);
+      const payload = {
+        ...formData,
+        tenant_id: user.role === 'super_admin' ? formData.tenant_id : user.tenant_id,
+        group_id: formData.group_id || null,
+      };
+      await axios.post(`${API}/auth/register`, payload);
       toast.success('Employee added successfully');
       setDialogOpen(false);
       setFormData({ email: '', password: '', first_name: '', last_name: '', employee_id: '', role: 'employee', tenant_id: '', group_id: '' });

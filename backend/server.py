@@ -1533,6 +1533,9 @@ async def register(user_data: UserCreate):
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    if user_data.role != UserRole.SUPER_ADMIN and not user_data.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant is required for this role")
+
     if user_data.employee_id and user_data.employee_id.strip() and user_data.tenant_id:
         existing_emp_id = await db.users.find_one(
             {"tenant_id": user_data.tenant_id, "employee_id": user_data.employee_id.strip()},
