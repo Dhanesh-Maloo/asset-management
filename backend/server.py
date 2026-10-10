@@ -2110,6 +2110,80 @@ async def create_asset(asset_data: AssetCreate, current_user: User = Depends(get
     
     return asset
 
+class BulkAssetItem(BaseModel):
+    serial_number: str = Field(..., min_length=1, max_length=100)
+    asset_tag: Optional[str] = Field(None, max_length=100)
+
+class BulkAssetCreate(BaseModel):
+    product_id: str
+    location: str = Field(..., min_length=1, max_length=200)
+    purchase_date: str = Field(..., min_length=1)
+    purchase_price: float = 0.0
+    warranty_end_date: Optional[str] = None
+    items: List[BulkAssetItem] = Field(..., min_length=1, max_length=500)
+
+@api_router.post("/assets/bulk-create")
+async def bulk_create_assets(data: BulkAssetCreate, current_user: User = Depends(get_current_user)):
+    """Create many assets at once from scanned serial numbers (shared product/location/date).
+    Blank asset tags are auto-generated as AST-00001, AST-00002, ... Duplicates are skipped, not fatal."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tenant_id = current_user.tenant_id or "default"
+
+    product = await db.products.find_one({"id": data.product_id, "is_deleted": {"$ne": True}}, {"_id": 0, "tenant_id": 1})
+    if not product or (current_user.role != UserRole.SUPER_ADMIN and product.get("tenant_id") != tenant_id):
+        raise HTTPException(status_code=400, detail="Product not found")
+
+    # Next auto tag number for this tenant
+    next_num = 1
+    async for a in db.assets.find({"tenant_id": tenant_id, "asset_tag": {"$regex": r"^AST-\d+$"}}, {"_id": 0, "asset_tag": 1}):
+        next_num = max(next_num, int(a["asset_tag"][4:]) + 1)
+
+    created, skipped = [], []
+    seen_serials = set()
+    for item in data.items:
+        serial = item.serial_number.strip()
+        key = serial.lower()
+        if not serial:
+            continue
+        if key in seen_serials:
+            skipped.append({"serial_number": serial, "reason": "Duplicate in this batch"})
+            continue
+        seen_serials.add(key)
+
+        exists = await db.assets.find_one(
+            {"tenant_id": tenant_id, "is_deleted": {"$ne": True},
+             "serial_number": {"$regex": f"^{re.escape(serial)}$", "$options": "i"}},
+            {"_id": 0, "asset_tag": 1},
+        )
+        if exists:
+            skipped.append({"serial_number": serial, "reason": f"Already exists as {exists.get('asset_tag', '')}"})
+            continue
+
+        tag = (item.asset_tag or "").strip()
+        if not tag:
+            tag = f"AST-{next_num:05d}"
+            next_num += 1
+
+        try:
+            await check_tier_limit(tenant_id, "assets")
+        except HTTPException as e:
+            skipped.append({"serial_number": serial, "reason": e.detail})
+            continue
+
+        asset = Asset(
+            asset_tag=tag, product_id=data.product_id, serial_number=serial, tenant_id=tenant_id,
+            location=data.location, purchase_date=data.purchase_date,
+            purchase_price=data.purchase_price, warranty_end_date=data.warranty_end_date,
+        )
+        await db.assets.insert_one(asset.model_dump())
+        await db.asset_history.insert_one(AssetHistory(
+            asset_id=asset.id, action="created", performed_by=current_user.id, notes="Asset created via scan"
+        ).model_dump())
+        created.append({"id": asset.id, "asset_tag": tag, "serial_number": serial})
+
+    return {"created": created, "skipped": skipped}
+
 @api_router.get("/assets", response_model=List[Asset])
 async def get_assets(
     current_user: User = Depends(get_current_user),

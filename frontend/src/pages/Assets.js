@@ -12,7 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus } from 'lucide-react';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../components/ui/collapsible';
+import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
+import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera } from 'lucide-react';
+import { BarcodeScannerDialog } from '../components/BarcodeScannerDialog';
+import { ScanToAddDialog } from '../components/ScanToAddDialog';
+import { LabelPhotoDialog } from '../components/LabelPhotoDialog';
+import { parseScannedValue } from '../lib/scanParse';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -32,6 +38,9 @@ const Assets = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [addAssetDialogOpen, setAddAssetDialogOpen] = useState(false);
+  const [addAssetAdvancedOpen, setAddAssetAdvancedOpen] = useState(false);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [showMoreColumns, setShowMoreColumns] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [assetToDelete, setAssetToDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,6 +53,10 @@ const Assets = () => {
     is_leased: false, lessor_name: '', lease_start_date: '', lease_end_date: '', monthly_lease_payment: 0
   });
   const [serialExists, setSerialExists] = useState(null); // null | {exists, asset_tag}
+  const [scanToAddOpen, setScanToAddOpen] = useState(false);
+  const [labelPhotoOpen, setLabelPhotoOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanTarget, setScanTarget] = useState('lookup'); // 'lookup' | 'serial' | 'tag'
 
   // Edit Asset state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -321,6 +334,61 @@ const Assets = () => {
     } catch { setSerialExists(null); }
   };
 
+  const openScanner = (target) => {
+    setScanTarget(target);
+    setScannerOpen(true);
+  };
+
+  const handleScanResult = (raw) => {
+    const value = (raw || '').trim();
+    if (!value) return;
+    const parsed = parseScannedValue(value);
+    const noSerial = () => toast.error(
+      parsed.kind === 'link'
+        ? `That QR code is a link (${parsed.host}) with no serial number in it. Scan the serial barcode instead.`
+        : 'No serial number found in that code'
+    );
+
+    if (scanTarget === 'serial') {
+      if (!parsed.serial) return noSerial();
+      setAssetForm((f) => ({ ...f, serial_number: parsed.serial }));
+      checkSerialNumber(parsed.serial);
+      return;
+    }
+    if (scanTarget === 'tag') {
+      const tag = parsed.tag || (parsed.kind === 'plain' ? parsed.serial : '');
+      if (!tag) return toast.error('No asset tag found in that code');
+      setAssetForm((f) => ({ ...f, asset_tag: tag }));
+      return;
+    }
+
+    // Lookup: this app's QR label, or a serial number / asset tag found in the code
+    const serialLower = (parsed.serial || '').toLowerCase();
+    const tagLower = (parsed.tag || '').toLowerCase();
+    const match = assets.find((a) =>
+      (parsed.assetId && a.id === parsed.assetId) ||
+      a.id === value ||
+      (serialLower && (a.serial_number || '').toLowerCase() === serialLower) ||
+      (serialLower && (a.asset_tag || '').toLowerCase() === serialLower) ||
+      (tagLower && (a.asset_tag || '').toLowerCase() === tagLower)
+    );
+    if (match) {
+      toast.success(`Found ${match.asset_tag}`);
+      navigate(`/assets/${match.id}`);
+    } else if (parsed.serial && canManage) {
+      toast.info('Not in inventory yet — adding as a new asset');
+      setAssetForm((f) => ({ ...f, serial_number: parsed.serial }));
+      checkSerialNumber(parsed.serial);
+      setAddAssetDialogOpen(true);
+    } else if (parsed.serial) {
+      toast.error(`No asset found for "${parsed.serial}"`);
+    } else if (parsed.assetId) {
+      toast.error('That asset label is not in your inventory');
+    } else {
+      noSerial();
+    }
+  };
+
   const handleAddAsset = async (e) => {
     e.preventDefault();
     if (!assetForm.location.trim()) {
@@ -435,6 +503,10 @@ const Assets = () => {
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => openScanner('lookup')} data-testid="scan-asset-btn">
+              <ScanLine className="h-4 w-4 mr-2" />
+              Scan
+            </Button>
             {canManage && (
               <Button variant="outline" onClick={handleExportCSV}>
                 <Download className="h-4 w-4 mr-2" />
@@ -451,6 +523,12 @@ const Assets = () => {
               <Button variant="outline" onClick={() => { setImportResult(null); setImportFile(null); setImportDialogOpen(true); }}>
                 <Upload className="h-4 w-4 mr-2" />
                 Import
+              </Button>
+            )}
+            {canManage && (
+              <Button variant="outline" onClick={() => setScanToAddOpen(true)} data-testid="scan-to-add-btn">
+                <ScanLine className="h-4 w-4 mr-2" />
+                Scan to Add
               </Button>
             )}
             {canManage && (
@@ -516,29 +594,60 @@ const Assets = () => {
                     <SelectItem value="disposed">Disposed</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={demoFilter || "all"} onValueChange={v => setDemoFilter(v === "all" ? "" : v)}>
-                  <SelectTrigger className="w-36 h-9">
-                    <SelectValue placeholder="All types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All types</SelectItem>
-                    <SelectItem value="demo">Demo Assets</SelectItem>
-                    <SelectItem value="regular">Regular Assets</SelectItem>
-                  </SelectContent>
-                </Select>
-                {departments.length > 0 && (
-                  <Select value={departmentFilter || "all"} onValueChange={v => setDepartmentFilter(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-44 h-9">
-                      <SelectValue placeholder="All Departments" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Departments</SelectItem>
-                      {departments.map(d => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                <Popover open={moreFiltersOpen} onOpenChange={setMoreFiltersOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 relative">
+                      <Filter className="h-3.5 w-3.5 mr-1.5" />
+                      More filters
+                      {(demoFilter || departmentFilter) && (
+                        <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center">
+                          {[demoFilter, departmentFilter].filter(Boolean).length}
+                        </span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 space-y-3" align="end">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Asset Type</Label>
+                      <Select value={demoFilter || "all"} onValueChange={v => setDemoFilter(v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-9 mt-1">
+                          <SelectValue placeholder="All types" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All types</SelectItem>
+                          <SelectItem value="demo">Demo Assets</SelectItem>
+                          <SelectItem value="regular">Regular Assets</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {departments.length > 0 && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Department</Label>
+                        <Select value={departmentFilter || "all"} onValueChange={v => setDepartmentFilter(v === "all" ? "" : v)}>
+                          <SelectTrigger className="h-9 mt-1">
+                            <SelectValue placeholder="All Departments" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Departments</SelectItem>
+                            {departments.map(d => (
+                              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {(demoFilter || departmentFilter) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full h-8 text-muted-foreground"
+                        onClick={() => { setDemoFilter(''); setDepartmentFilter(''); }}
+                      >
+                        Clear filters
+                      </Button>
+                    )}
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
           </CardHeader>
@@ -567,6 +676,16 @@ const Assets = () => {
               </div>
             ) : (
               <div className="overflow-x-auto">
+                <div className="flex justify-end mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreColumns(v => !v)}
+                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  >
+                    {showMoreColumns ? 'Hide extra columns' : 'Show more columns'}
+                    <ChevronDown className={`h-3 w-3 transition-transform ${showMoreColumns ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -579,12 +698,12 @@ const Assets = () => {
                       )}
                       <TableHead>Asset Tag</TableHead>
                       <TableHead>Product</TableHead>
-                      <TableHead>Serial Number</TableHead>
+                      {showMoreColumns && <TableHead>Serial Number</TableHead>}
                       <TableHead>Status</TableHead>
-                      {user?.role === 'super_admin' && <TableHead>Tenant</TableHead>}
+                      {showMoreColumns && user?.role === 'super_admin' && <TableHead>Tenant</TableHead>}
                       {canManage && <TableHead>Assigned To</TableHead>}
-                      <TableHead>Location</TableHead>
-                      <TableHead>Expiry Date</TableHead>
+                      {showMoreColumns && <TableHead>Location</TableHead>}
+                      {showMoreColumns && <TableHead>Expiry Date</TableHead>}
                       {canManage && <TableHead>Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -610,9 +729,11 @@ const Assets = () => {
                         <TableCell className="font-medium">
                           {products[asset.product_id]?.name || 'Unknown Product'}
                         </TableCell>
-                        <TableCell className="font-mono text-[13px] text-muted-foreground">{asset.serial_number}</TableCell>
+                        {showMoreColumns && (
+                          <TableCell className="font-mono text-[13px] text-muted-foreground">{asset.serial_number}</TableCell>
+                        )}
                         <TableCell>{getStatusBadge(asset.status)}</TableCell>
-                        {user?.role === 'super_admin' && (
+                        {showMoreColumns && user?.role === 'super_admin' && (
                           <TableCell className="text-sm">
                             <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground text-xs font-medium">
                               {tenants[asset.tenant_id]?.name || 'Unknown'}
@@ -628,10 +749,12 @@ const Assets = () => {
                             )}
                           </TableCell>
                         )}
-                        <TableCell>{asset.location || '-'}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {asset.expiry_date ? new Date(asset.expiry_date).toLocaleDateString() : '-'}
-                        </TableCell>
+                        {showMoreColumns && <TableCell>{asset.location || '-'}</TableCell>}
+                        {showMoreColumns && (
+                          <TableCell className="text-sm text-muted-foreground">
+                            {asset.expiry_date ? new Date(asset.expiry_date).toLocaleDateString() : '-'}
+                          </TableCell>
+                        )}
                         {canManage && (
                           <TableCell>
                             <div className="flex items-center gap-1">
@@ -764,6 +887,28 @@ const Assets = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ScanToAddDialog
+        open={scanToAddOpen}
+        onOpenChange={setScanToAddOpen}
+        products={products}
+        existingSerials={new Set(assets.map((a) => (a.serial_number || '').toLowerCase()))}
+        onCreated={fetchData}
+      />
+      <LabelPhotoDialog
+        open={labelPhotoOpen}
+        onOpenChange={setLabelPhotoOpen}
+        products={products}
+        onApply={({ serial_number, product_id }) => {
+          setAssetForm((f) => ({ ...f, serial_number, product_id: product_id || f.product_id }));
+          checkSerialNumber(serial_number);
+        }}
+      />
+      <BarcodeScannerDialog
+        open={scannerOpen}
+        onOpenChange={setScannerOpen}
+        onScan={handleScanResult}
+        title={scanTarget === 'serial' ? 'Scan Serial Number' : scanTarget === 'tag' ? 'Scan Asset Tag' : 'Scan Asset'}
+      />
       {/* Add Asset Dialog */}
       <Dialog open={addAssetDialogOpen} onOpenChange={setAddAssetDialogOpen}>
         <DialogContent className="max-w-lg" data-testid="add-asset-dialog">
@@ -772,14 +917,28 @@ const Assets = () => {
             <DialogDescription>Manually onboard an IT asset into the system</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddAsset} className="space-y-4">
+            <Button type="button" variant="outline" size="sm" onClick={() => setLabelPhotoOpen(true)} data-testid="label-photo-btn">
+              <Camera className="h-4 w-4 mr-2" />
+              Read from photo of box / label
+            </Button>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="asset-tag">Asset Tag *</Label>
-                <Input id="asset-tag" value={assetForm.asset_tag} onChange={(e) => setAssetForm({ ...assetForm, asset_tag: e.target.value })} placeholder="ASSET-001" required maxLength={100} data-testid="asset-tag-input" />
+                <div className="flex gap-1.5">
+                  <Input id="asset-tag" value={assetForm.asset_tag} onChange={(e) => setAssetForm({ ...assetForm, asset_tag: e.target.value })} placeholder="ASSET-001" required maxLength={100} data-testid="asset-tag-input" />
+                  <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openScanner('tag')} title="Scan asset tag" aria-label="Scan asset tag">
+                    <ScanLine className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
               <div>
                 <Label htmlFor="serial-number">Serial Number *</Label>
-                <Input id="serial-number" value={assetForm.serial_number} onChange={(e) => { setAssetForm({ ...assetForm, serial_number: e.target.value }); checkSerialNumber(e.target.value); }} placeholder="SN-ABC123" required maxLength={100} data-testid="asset-serial-input" className={serialExists?.exists ? 'border-orange-400' : ''} />
+                <div className="flex gap-1.5">
+                  <Input id="serial-number" value={assetForm.serial_number} onChange={(e) => { setAssetForm({ ...assetForm, serial_number: e.target.value }); checkSerialNumber(e.target.value); }} placeholder="SN-ABC123" required maxLength={100} data-testid="asset-serial-input" className={serialExists?.exists ? 'border-orange-400' : ''} />
+                  <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={() => openScanner('serial')} title="Scan serial number" aria-label="Scan serial number" data-testid="scan-serial-btn">
+                    <ScanLine className="h-4 w-4" />
+                  </Button>
+                </div>
                 {serialExists?.exists && (
                   <p className="text-xs text-orange-600 flex items-center gap-1 mt-1">
                     <AlertTriangle className="h-3 w-3" /> Duplicate: already used by <strong>{serialExists.asset_tag}</strong>
@@ -820,71 +979,85 @@ const Assets = () => {
                 <Input id="asset-expiry-date" type="date" value={assetForm.expiry_date} onChange={(e) => setAssetForm({ ...assetForm, expiry_date: e.target.value })} />
               </div>
             </div>
-            <div>
-              <Label htmlFor="asset-dep-rate">Depreciation Rate (%/year)</Label>
-              <Input id="asset-dep-rate" type="number" min="0" max="100" value={assetForm.depreciation_rate} onChange={(e) => setAssetForm({ ...assetForm, depreciation_rate: parseFloat(e.target.value) || 20 })} />
-            </div>
-            <div>
-              <Label>Depreciation Method</Label>
-              <Select value={assetForm.depreciation_method} onValueChange={(val) => setAssetForm({ ...assetForm, depreciation_method: val })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="straight_line">Straight Line</SelectItem>
-                  <SelectItem value="declining_balance">Declining Balance</SelectItem>
-                  <SelectItem value="none">No Depreciation</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Asset Category</Label>
-              <Select value={assetForm.is_demo ? 'demo' : 'regular'} onValueChange={(val) => setAssetForm({ ...assetForm, is_demo: val === 'demo' })}>
-                <SelectTrigger data-testid="asset-category-select">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="regular">Regular Asset</SelectItem>
-                  <SelectItem value="demo">Demo Asset</SelectItem>
-                </SelectContent>
-              </Select>
-              {assetForm.is_demo && (
-                <p className="text-xs text-amber-600 mt-1">This asset will be marked as a demo and visible in the Demo Assets filter.</p>
-              )}
-            </div>
-            <div>
-              <Label>Ownership Type</Label>
-              <Select value={assetForm.is_leased ? 'leased' : 'owned'} onValueChange={(val) => setAssetForm({ ...assetForm, is_leased: val === 'leased' })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="owned">Owned</SelectItem>
-                  <SelectItem value="leased">Leased</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {assetForm.is_leased && (
-              <div className="space-y-3 p-3 border border-primary/20 rounded-lg bg-primary/5">
-                <p className="text-xs font-semibold text-primary">Lease Details</p>
+            <Collapsible open={addAssetAdvancedOpen} onOpenChange={setAddAssetAdvancedOpen}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Advanced details (accounting, leasing)
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${addAssetAdvancedOpen ? 'rotate-180' : ''}`} />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-4 pt-4">
                 <div>
-                  <Label>Lessor Name</Label>
-                  <Input value={assetForm.lessor_name} onChange={e => setAssetForm({ ...assetForm, lessor_name: e.target.value })} placeholder="e.g. ABC Leasing Pvt Ltd" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Lease Start Date</Label>
-                    <Input type="date" value={assetForm.lease_start_date} onChange={e => setAssetForm({ ...assetForm, lease_start_date: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label>Lease End Date</Label>
-                    <Input type="date" value={assetForm.lease_end_date} onChange={e => setAssetForm({ ...assetForm, lease_end_date: e.target.value })} />
-                  </div>
+                  <Label htmlFor="asset-dep-rate">Depreciation Rate (%/year)</Label>
+                  <Input id="asset-dep-rate" type="number" min="0" max="100" value={assetForm.depreciation_rate} onChange={(e) => setAssetForm({ ...assetForm, depreciation_rate: parseFloat(e.target.value) || 20 })} />
                 </div>
                 <div>
-                  <Label>Monthly Payment (₹)</Label>
-                  <Input type="number" min="0" value={assetForm.monthly_lease_payment} onChange={e => setAssetForm({ ...assetForm, monthly_lease_payment: parseFloat(e.target.value) || 0 })} />
+                  <Label>Depreciation Method</Label>
+                  <Select value={assetForm.depreciation_method} onValueChange={(val) => setAssetForm({ ...assetForm, depreciation_method: val })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="straight_line">Straight Line</SelectItem>
+                      <SelectItem value="declining_balance">Declining Balance</SelectItem>
+                      <SelectItem value="none">No Depreciation</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-            )}
+                <div>
+                  <Label>Asset Category</Label>
+                  <Select value={assetForm.is_demo ? 'demo' : 'regular'} onValueChange={(val) => setAssetForm({ ...assetForm, is_demo: val === 'demo' })}>
+                    <SelectTrigger data-testid="asset-category-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="regular">Regular Asset</SelectItem>
+                      <SelectItem value="demo">Demo Asset</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {assetForm.is_demo && (
+                    <p className="text-xs text-amber-600 mt-1">This asset will be marked as a demo and visible in the Demo Assets filter.</p>
+                  )}
+                </div>
+                <div>
+                  <Label>Ownership Type</Label>
+                  <Select value={assetForm.is_leased ? 'leased' : 'owned'} onValueChange={(val) => setAssetForm({ ...assetForm, is_leased: val === 'leased' })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="owned">Owned</SelectItem>
+                      <SelectItem value="leased">Leased</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {assetForm.is_leased && (
+                  <div className="space-y-3 p-3 border border-primary/20 rounded-lg bg-primary/5">
+                    <p className="text-xs font-semibold text-primary">Lease Details</p>
+                    <div>
+                      <Label>Lessor Name</Label>
+                      <Input value={assetForm.lessor_name} onChange={e => setAssetForm({ ...assetForm, lessor_name: e.target.value })} placeholder="e.g. ABC Leasing Pvt Ltd" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Lease Start Date</Label>
+                        <Input type="date" value={assetForm.lease_start_date} onChange={e => setAssetForm({ ...assetForm, lease_start_date: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label>Lease End Date</Label>
+                        <Input type="date" value={assetForm.lease_end_date} onChange={e => setAssetForm({ ...assetForm, lease_end_date: e.target.value })} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Monthly Payment (₹)</Label>
+                      <Input type="number" min="0" value={assetForm.monthly_lease_payment} onChange={e => setAssetForm({ ...assetForm, monthly_lease_payment: parseFloat(e.target.value) || 0 })} />
+                    </div>
+                  </div>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAddAssetDialogOpen(false)}>Cancel</Button>
               <Button type="submit" data-testid="submit-asset-btn">Add Asset</Button>
