@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Separator } from '../components/ui/separator';
 import {
@@ -19,7 +20,7 @@ import {
   LogOut as ReturnIcon, LogIn as CheckoutIcon, TrendingDown,
   Plus, AlertCircle, CheckCircle, QrCode, Printer, Clock,
   Camera, Trash2, ArrowRightLeft, Settings2, FileText, Upload,
-  Download, XCircle, Wrench as AMCIcon, RefreshCw
+  Download, XCircle, Wrench as AMCIcon, RefreshCw, MoreHorizontal
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
@@ -40,6 +41,7 @@ const AssetDetail = () => {
   const [assetHistory, setAssetHistory] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
   
   const [checkoutDialogOpen, setCheckoutDialogOpen] = useState(false);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
@@ -549,22 +551,42 @@ const AssetDetail = () => {
           )}
         </div>
 
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
             <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
             <TabsTrigger value="warranty">Warranty</TabsTrigger>
-            <TabsTrigger value="depreciation">Depreciation</TabsTrigger>
             <TabsTrigger value="documents">
               Documents {documents.length > 0 && <span className="ml-1 bg-primary text-white text-xs px-1.5 py-0.5 rounded-full">{documents.length}</span>}
             </TabsTrigger>
-            <TabsTrigger value="amc">
-              AMC {amcContracts.length > 0 && <span className="ml-1 bg-success text-white text-xs px-1.5 py-0.5 rounded-full">{amcContracts.length}</span>}
-            </TabsTrigger>
             <TabsTrigger value="qrcode">QR Code</TabsTrigger>
             <TabsTrigger value="photo">Photo</TabsTrigger>
-            {customFields.length > 0 && <TabsTrigger value="custom">Custom Fields</TabsTrigger>}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-md transition-colors ${
+                    ['depreciation', 'amc', 'custom'].includes(activeTab)
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  data-testid="asset-detail-more-tab-trigger"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  More
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={() => setActiveTab('depreciation')}>Depreciation</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab('amc')}>
+                  AMC (Maintenance Contract) {amcContracts.length > 0 && `(${amcContracts.length})`}
+                </DropdownMenuItem>
+                {customFields.length > 0 && (
+                  <DropdownMenuItem onClick={() => setActiveTab('custom')}>Custom Fields</DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </TabsList>
 
           {/* Overview Tab */}

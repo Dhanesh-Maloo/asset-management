@@ -71,7 +71,22 @@ const DashboardLayout = ({ children }) => {
     }
   };
 
-  const totalCount = notifications.reduce((sum, n) => sum + (n.count || 0), 0);
+  // Notifications are computed live on the server, so track "seen" state locally.
+  // A notification counts as unread again only if its count changes.
+  const seenKey = `seenNotifications_${user?.id || user?.email || 'user'}`;
+  const [seen, setSeen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(seenKey) || '{}'); } catch { return {}; }
+  });
+  const notifKey = (n) => n.type;
+  const isUnread = (n) => seen[notifKey(n)] !== n.count;
+  const totalCount = notifications.filter(isUnread).reduce((sum, n) => sum + (n.count || 0), 0);
+
+  const markAllSeen = () => {
+    const next = {};
+    notifications.forEach(n => { next[notifKey(n)] = n.count; });
+    setSeen(next);
+    localStorage.setItem(seenKey, JSON.stringify(next));
+  };
 
   const typeIcon = (type) => {
     const icons = {
@@ -146,7 +161,7 @@ const DashboardLayout = ({ children }) => {
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>
               <button
-                onClick={() => setNotifOpen(!notifOpen)}
+                onClick={() => { if (!notifOpen) markAllSeen(); setNotifOpen(!notifOpen); }}
                 className="relative p-2 hover:bg-accent rounded-md transition-colors"
                 data-testid="notification-bell"
               >

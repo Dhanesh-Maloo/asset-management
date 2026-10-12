@@ -1208,10 +1208,11 @@ def check_rate_limit(ip: str, store: dict = _rate_limit_store):
     store[ip] = attempts
 
 # ── Audit log helper ──────────────────────────────────────────────────────────
-async def write_audit_log(user_id: str, action: str, resource: str, resource_id: str, details: str = ""):
+async def write_audit_log(user_id: str, action: str, resource: str, resource_id: str, details: str = "", tenant_id: Optional[str] = None):
     await db.audit_log.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user_id,
+        "tenant_id": tenant_id,
         "action": action,
         "resource": resource,
         "resource_id": resource_id,
@@ -1655,7 +1656,7 @@ async def login(credentials: UserLogin, request: Request, response: Response):
 
     user.pop("password_hash", None)
     token = create_access_token({"sub": user["id"], "email": user["email"], "role": user["role"]})
-    await write_audit_log(user["id"], "login", "user", user["id"], f"Login from {client_ip}")
+    await write_audit_log(user["id"], "login", "user", user["id"], f"Login from {client_ip}", tenant_id=user.get("tenant_id"))
     return {"token": token, "user": User(**user)}
 
 # Password Reset endpoints
@@ -3324,7 +3325,7 @@ async def delete_product(product_id: str, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Product not found")
     # Soft delete
     await db.products.update_one({"id": product_id}, {"$set": {"is_deleted": True, "deleted_at": datetime.now(timezone.utc).isoformat()}})
-    await write_audit_log(current_user.id, "delete", "product", product_id)
+    await write_audit_log(current_user.id, "delete", "product", product_id, tenant_id=current_user.tenant_id)
     return {"message": "Product deleted successfully"}
 
 @api_router.delete("/assets/{asset_id}")
@@ -3338,7 +3339,7 @@ async def delete_asset(asset_id: str, current_user: User = Depends(get_current_u
         raise HTTPException(status_code=403, detail="Access denied")
     # Soft delete
     await db.assets.update_one({"id": asset_id}, {"$set": {"is_deleted": True, "deleted_at": datetime.now(timezone.utc).isoformat()}})
-    await write_audit_log(current_user.id, "delete", "asset", asset_id)
+    await write_audit_log(current_user.id, "delete", "asset", asset_id, tenant_id=current_user.tenant_id)
     return {"message": "Asset deleted successfully"}
 
 @api_router.delete("/tickets/{ticket_id}")
@@ -3349,7 +3350,7 @@ async def delete_ticket(ticket_id: str, current_user: User = Depends(get_current
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     await db.tickets.delete_one({"id": ticket_id})
-    await write_audit_log(current_user.id, "delete", "ticket", ticket_id)
+    await write_audit_log(current_user.id, "delete", "ticket", ticket_id, tenant_id=current_user.tenant_id)
     return {"message": "Ticket deleted successfully"}
 
 @api_router.delete("/orders/{order_id}")
@@ -3362,7 +3363,7 @@ async def delete_order(order_id: str, current_user: User = Depends(get_current_u
     if order.get("status") == OrderStatus.FULFILLED:
         raise HTTPException(status_code=400, detail="Cannot delete a fulfilled order")
     await db.orders.delete_one({"id": order_id})
-    await write_audit_log(current_user.id, "delete", "order", order_id)
+    await write_audit_log(current_user.id, "delete", "order", order_id, tenant_id=current_user.tenant_id)
     return {"message": "Order deleted successfully"}
 
 # ── Feature 1: Notifications endpoint ────────────────────────────────────────
@@ -3514,7 +3515,7 @@ async def trigger_email_alerts(current_user: User = Depends(get_current_user)):
             )
         sent_count += len(admin_emails)
 
-    await write_audit_log(current_user.id, "trigger_alerts", "system", "alerts", f"Sent to {sent_count} recipients")
+    await write_audit_log(current_user.id, "trigger_alerts", "system", "alerts", f"Sent to {sent_count} recipients", tenant_id=current_user.tenant_id)
     return {"message": f"Alert emails sent to {len(admin_emails)} admin(s)", "alerts_triggered": sent_count}
 
 # ── Feature 3: Asset History endpoint ────────────────────────────────────────
@@ -3622,7 +3623,7 @@ async def bulk_delete_assets(body: BulkDeleteRequest, current_user: User = Depen
         query,
         {"$set": {"is_deleted": True, "deleted_at": datetime.now(timezone.utc).isoformat()}}
     )
-    await write_audit_log(current_user.id, "bulk_delete", "assets", ",".join(body.ids), f"{result.modified_count} assets deleted")
+    await write_audit_log(current_user.id, "bulk_delete", "assets", ",".join(body.ids), f"{result.modified_count} assets deleted", tenant_id=current_user.tenant_id)
     return {"message": f"{result.modified_count} assets deleted successfully"}
 
 @api_router.post("/tickets/bulk-delete")
@@ -3744,7 +3745,7 @@ async def change_password(req: ChangePasswordRequest, current_user: User = Depen
     validate_password_strength(req.new_password)
     new_hash = hash_password(req.new_password)
     await db.users.update_one({"id": current_user.id}, {"$set": {"password_hash": new_hash}})
-    await write_audit_log(current_user.id, "change_password", "user", current_user.id)
+    await write_audit_log(current_user.id, "change_password", "user", current_user.id, tenant_id=current_user.tenant_id)
     return {"message": "Password changed successfully"}
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4086,7 +4087,7 @@ async def update_transfer(transfer_id: str, action: str, current_user: User = De
             {"$set": {"assigned_to": transfer["to_user_id"], "status": "assigned"}}
         )
         await write_audit_log(current_user.id, "transfer_complete", "asset", transfer["asset_id"],
-                              f"Transferred to {transfer['to_user_id']}")
+                              f"Transferred to {transfer['to_user_id']}", tenant_id=current_user.tenant_id)
     await db.asset_transfers.update_one({"id": transfer_id}, {"$set": updates})
     return {"message": f"Transfer {action}"}
 
@@ -4147,7 +4148,7 @@ async def bulk_update_assets(body: BulkAssetUpdate, current_user: User = Depends
     if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
     result = await db.assets.update_many(query, {"$set": updates})
-    await write_audit_log(current_user.id, "bulk_update", "assets", ",".join(body.ids), f"{result.modified_count} assets updated")
+    await write_audit_log(current_user.id, "bulk_update", "assets", ",".join(body.ids), f"{result.modified_count} assets updated", tenant_id=current_user.tenant_id)
     return {"updated": result.modified_count}
 
 @api_router.post("/assets/bulk-dispatch")
@@ -4186,7 +4187,7 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
         AssetHistory(asset_id=a["id"], action="dispatched", performed_by=current_user.id, notes=history_note).model_dump()
         for a in assets
     ])
-    await write_audit_log(current_user.id, "bulk_dispatch", "assets", ",".join(body.ids), f"{result.modified_count} assets dispatched to {body.assigned_to}")
+    await write_audit_log(current_user.id, "bulk_dispatch", "assets", ",".join(body.ids), f"{result.modified_count} assets dispatched to {body.assigned_to}", tenant_id=current_user.tenant_id)
 
     if recipient.get("email"):
         tags = ", ".join(a["asset_tag"] for a in assets)
@@ -4376,7 +4377,13 @@ async def report_asset_depreciation(current_user: User = Depends(get_current_use
         if not purchase_date_str:
             purchase_date_str = now.isoformat()
         try:
-            purchase_date = datetime.fromisoformat(purchase_date_str.replace("Z", "+00:00"))
+            if isinstance(purchase_date_str, datetime):
+                purchase_date = purchase_date_str
+            else:
+                purchase_date = datetime.fromisoformat(str(purchase_date_str).replace("Z", "+00:00"))
+            # Date-only strings parse as naive; treat as UTC so subtraction works
+            if purchase_date.tzinfo is None:
+                purchase_date = purchase_date.replace(tzinfo=timezone.utc)
         except Exception:
             purchase_date = now
         years = max((now - purchase_date).days / 365.25, 0)
@@ -4413,8 +4420,12 @@ async def get_activity_feed(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     current_user: User = Depends(get_current_user_hybrid)
 ):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
     skip = (page - 1) * limit
     query: dict = {}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
     if action_type:
         query["action"] = action_type
     if resource_type:
@@ -5039,7 +5050,7 @@ async def delete_demo_data(current_user: User = Depends(get_current_user_hybrid)
         result = await db[collection_name].delete_many({"id": {"$in": ids}})
         deleted_count += result.deleted_count
     await db.demo_data_registry.delete_many({"tenant_id": tenant_id})
-    await write_audit_log(current_user.id, "delete", "demo_data", tenant_id, f"Cleared {deleted_count} demo items")
+    await write_audit_log(current_user.id, "delete", "demo_data", tenant_id, f"Cleared {deleted_count} demo items", tenant_id=tenant_id)
     return {"message": "Demo data cleared successfully", "items_deleted": deleted_count}
 
 
