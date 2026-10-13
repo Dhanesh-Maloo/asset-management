@@ -275,7 +275,7 @@ const AssetDetail = () => {
 </head>
 <body>
   <div class="label">
-    <div class="header">IT Asset Management</div>
+    <div class="header">Asset Management</div>
     <div class="body">
       <div class="qr-wrap">${qrSvg}</div>
       <div class="info">

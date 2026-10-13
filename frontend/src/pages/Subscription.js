@@ -116,7 +116,7 @@ const Subscription = () => {
 </style>
 </head><body>
 <div class="header">
-  <div><h1>INVOICE</h1><p style="color:#555;margin-top:4px">IT Asset Management Platform</p></div>
+  <div><h1>INVOICE</h1><p style="color:#555;margin-top:4px">Asset Management Platform</p></div>
   <div class="meta">
     <div><strong>Invoice #</strong> ${invoice.id.slice(0, 8).toUpperCase()}</div>
     <div><strong>Date:</strong> ${formatDate(invoice.created_at)}</div>

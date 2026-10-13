@@ -1002,14 +1002,14 @@ async def send_alert_email(to_email: str, subject: str, items: list, intro: str 
     html_body = f"""
     <html>
       <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
-        <h2 style="color:#4F46E5;">IT Asset Management — Alert</h2>
+        <h2 style="color:#4F46E5;">Asset Management — Alert</h2>
         <h3>{subject}</h3>
         {f'<p>{intro}</p>' if intro else ''}
         <table style="width:100%;border-collapse:collapse;margin-top:12px;">
           {rows}
         </table>
         <p style="color:#6B7280;font-size:13px;margin-top:24px;">
-          Log in to <a href="{FRONTEND_URL}" style="color:#4F46E5;">IT Asset Management</a> to take action.
+          Log in to <a href="{FRONTEND_URL}" style="color:#4F46E5;">Asset Management</a> to take action.
         </p>
       </body>
     </html>"""
@@ -1508,12 +1508,12 @@ async def test_email(current_user: User = Depends(get_current_user)):
       <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
         <h2 style="color:#4F46E5;">Email is Working!</h2>
         <p>Hello {current_user.name},</p>
-        <p>This is a test email from your IT Asset Management system. Email is configured correctly.</p>
+        <p>This is a test email from your Asset Management system. Email is configured correctly.</p>
         <p style="color:#6B7280;font-size:13px;">Sent from: {FROM_EMAIL}</p>
       </body>
     </html>"""
     try:
-        await _send_email(current_user.email, "IT Asset Management — Test Email", html_body)
+        await _send_email(current_user.email, "Asset Management — Test Email", html_body)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"message": f"Test email sent to {current_user.email}"}

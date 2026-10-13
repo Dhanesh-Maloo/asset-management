@@ -290,7 +290,7 @@ const Assets = () => {
       const qrValue = `${window.location.origin}/assets/${a.id}`;
       return `
         <div class="label">
-          <div class="header">IT Asset Management</div>
+          <div class="header">Asset Management</div>
           <div class="body">
             <div class="qr-placeholder" data-value="${qrValue}" data-tag="${a.asset_tag}">
               <img src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrValue)}" width="80" height="80" />

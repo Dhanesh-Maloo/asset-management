@@ -86,7 +86,7 @@ const Login = () => {
             <Boxes size={20} color="white" />
           </div>
           <span style={{ color: 'white', fontWeight: 700, fontSize: '16px', letterSpacing: '-0.3px' }}>
-            IT Asset Management
+            Asset Management
           </span>
         </div>
 
@@ -173,7 +173,7 @@ const Login = () => {
             <div style={{ width: '36px', height: '36px', background: '#2563eb', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Boxes size={18} color="white" />
             </div>
-            <span style={{ fontWeight: 700, fontSize: '15px', color: '#111827' }}>IT Asset Management</span>
+            <span style={{ fontWeight: 700, fontSize: '15px', color: '#111827' }}>Asset Management</span>
           </div>
 
           <h1 style={{ fontSize: '26px', fontWeight: 800, color: '#0f172a', marginBottom: '4px', letterSpacing: '-0.4px' }}>

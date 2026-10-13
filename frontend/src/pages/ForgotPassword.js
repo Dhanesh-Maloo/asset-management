@@ -44,7 +44,7 @@ const ForgotPassword = () => {
         <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
           <Boxes className="h-5 w-5 text-white" />
         </div>
-        <span className="text-lg font-semibold font-heading text-white">IT Asset Management</span>
+        <span className="text-lg font-semibold font-heading text-white">Asset Management</span>
       </div>
 
       <Card className="w-full max-w-md relative z-10 shadow-2xl animate-fade-in" data-testid="forgot-password-card">
