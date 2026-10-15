@@ -137,24 +137,6 @@ const Login = () => {
           </div>
         </div>
 
-        {/* Stats */}
-        <div style={{
-          display: 'flex', gap: '32px',
-          position: 'relative', zIndex: 1,
-          borderTop: '1px solid rgba(255,255,255,0.1)',
-          paddingTop: '24px',
-        }}>
-          {[
-            { n: '10k+', label: 'Assets tracked' },
-            { n: '500+', label: 'Companies' },
-            { n: '99.9%', label: 'Uptime SLA' },
-          ].map((s, i) => (
-            <div key={i}>
-              <div style={{ color: 'white', fontWeight: 800, fontSize: '20px' }}>{s.n}</div>
-              <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', marginTop: '2px' }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* ── Right Panel ── */}
