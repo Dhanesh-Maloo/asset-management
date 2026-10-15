@@ -3796,11 +3796,13 @@ class MasterQRCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     location: str = Field("", max_length=200)
     asset_ids: List[str] = Field(..., min_length=1, max_length=500)
+    is_public: bool = True
 
 class MasterQRUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     location: Optional[str] = Field(None, max_length=200)
     asset_ids: Optional[List[str]] = Field(None, max_length=500)
+    is_public: Optional[bool] = None
 
 def _master_qr_scope(current_user: User) -> dict:
     return {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
@@ -3833,6 +3835,7 @@ async def create_master_qr(body: MasterQRCreate, current_user: User = Depends(ge
         "name": body.name.strip(),
         "location": body.location.strip(),
         "asset_ids": ids,
+        "is_public": body.is_public,
         "tenant_id": tenant_id,
         "created_by": current_user.id,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -3848,7 +3851,43 @@ async def list_master_qrs(current_user: User = Depends(get_current_user_hybrid))
     docs = await db.master_qrs.find(_master_qr_scope(current_user), {"_id": 0}).sort("created_at", -1).to_list(1000)
     for d in docs:
         d["asset_count"] = len(d.get("asset_ids", []))
+        d["is_public"] = d.get("is_public", True)
     return docs
+
+_public_qr_hits: dict = {}  # {ip: [timestamp, ...]}
+PUBLIC_QR_MAX_PER_MINUTE = 60
+
+@api_router.get("/public/master-qrs/{master_id}")
+async def get_public_master_qr(master_id: str, request: Request):
+    """No-login view of a master QR. Only non-sensitive fields; 404 unless the owner left it public."""
+    ip = get_client_ip(request)
+    now = datetime.now(timezone.utc).timestamp()
+    hits = [t for t in _public_qr_hits.get(ip, []) if now - t < 60]
+    if len(hits) >= PUBLIC_QR_MAX_PER_MINUTE:
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again in a minute.")
+    hits.append(now)
+    _public_qr_hits[ip] = hits
+
+    doc = await db.master_qrs.find_one({"id": master_id}, {"_id": 0})
+    if not doc or not doc.get("is_public", True):
+        raise HTTPException(status_code=404, detail="This QR code is not available")
+    assets = await _live_assets_for(doc.get("asset_ids", []), {"tenant_id": doc["tenant_id"]})
+    tenant = await db.tenants.find_one({"id": doc["tenant_id"]}, {"_id": 0, "name": 1})
+    return {
+        "name": doc["name"],
+        "location": doc.get("location", ""),
+        "organization": (tenant or {}).get("name", ""),
+        "asset_count": len(assets),
+        "assets": [
+            {
+                "asset_tag": a.get("asset_tag", ""),
+                "product_name": a.get("product_name", ""),
+                "status": a.get("status", ""),
+                "location": a.get("location", ""),
+            }
+            for a in assets
+        ],
+    }
 
 @api_router.get("/master-qrs/{master_id}")
 async def get_master_qr(master_id: str, current_user: User = Depends(get_current_user_hybrid)):
@@ -3860,6 +3899,7 @@ async def get_master_qr(master_id: str, current_user: User = Depends(get_current
         raise HTTPException(status_code=404, detail="Master QR not found")
     doc["assets"] = await _live_assets_for(doc.get("asset_ids", []), scope)
     doc["asset_count"] = len(doc["assets"])
+    doc["is_public"] = doc.get("is_public", True)
     return doc
 
 @api_router.put("/master-qrs/{master_id}")
@@ -3875,6 +3915,8 @@ async def update_master_qr(master_id: str, body: MasterQRUpdate, current_user: U
         updates["name"] = body.name.strip()
     if body.location is not None:
         updates["location"] = body.location.strip()
+    if body.is_public is not None:
+        updates["is_public"] = body.is_public
     if body.asset_ids is not None:
         ids = list(dict.fromkeys(body.asset_ids))
         if not ids:

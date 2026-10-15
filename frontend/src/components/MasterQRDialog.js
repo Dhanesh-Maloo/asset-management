@@ -23,11 +23,13 @@ export const MasterQRDialog = ({ open, onOpenChange, assets, onCreated }) => {
   const [savedLocations, setSavedLocations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState(null);
+  const [isPublic, setIsPublic] = useState(true);
 
   useEffect(() => {
     if (!open) return;
     setCreated(null);
     setName('');
+    setIsPublic(true);
     // Pre-fill when every selected asset is already in the same place
     const locs = [...new Set(assets.map((a) => (a.location || '').trim()).filter(Boolean))];
     setLocation(locs.length === 1 && assets.every((a) => (a.location || '').trim()) ? locs[0] : '');
@@ -44,6 +46,7 @@ export const MasterQRDialog = ({ open, onOpenChange, assets, onCreated }) => {
         name: name.trim(),
         location: location.trim(),
         asset_ids: assets.map((a) => a.id),
+        is_public: isPublic,
       });
       setCreated(res.data);
       onCreated?.(res.data);
@@ -80,6 +83,13 @@ export const MasterQRDialog = ({ open, onOpenChange, assets, onCreated }) => {
                 </datalist>
                 <p className="text-xs text-muted-foreground">Pick a saved location or type a new one. Shown on the label.</p>
               </div>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="checkbox" className="mt-1" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} data-testid="master-qr-public" />
+                <span>
+                  Anyone who scans can view it (no login)
+                  <span className="block text-xs text-muted-foreground">Shows asset tag, product, status and location only. Never serial numbers, prices or assigned users.</span>
+                </span>
+              </label>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

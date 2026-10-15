@@ -10,7 +10,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { toast } from 'sonner';
-import { ArrowLeft, MapPin, Printer, Pencil, X, Check } from 'lucide-react';
+import { ArrowLeft, MapPin, Printer, Pencil, X, Check, Globe, Lock } from 'lucide-react';
 import { masterQrUrl, printMasterQr } from '../lib/masterQr';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -47,6 +47,16 @@ const MasterQRDetail = () => {
       await axios.put(`${API}/master-qrs/${masterId}`, { name: form.name.trim(), location: form.location.trim() });
       setEditing(false);
       toast.success('Updated');
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to update');
+    }
+  };
+
+  const togglePublic = async () => {
+    try {
+      await axios.put(`${API}/master-qrs/${masterId}`, { is_public: !master.is_public });
+      toast.success(master.is_public ? 'Now login-only' : 'Now public');
       load();
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to update');
@@ -102,6 +112,11 @@ const MasterQRDetail = () => {
                   <p className="text-sm text-slate-500 mt-1">{master.asset_count} assets · created {new Date(master.created_at).toLocaleDateString()}</p>
                   <div className="flex gap-2 mt-4">
                     <Button onClick={() => printMasterQr(master)}><Printer className="h-4 w-4 mr-2" />Print Label</Button>
+                    {canManage && (
+                      <Button variant="outline" onClick={togglePublic} title="Toggle whether anyone can view this without logging in">
+                        {master.is_public ? <><Globe className="h-4 w-4 mr-2" />Public</> : <><Lock className="h-4 w-4 mr-2" />Login only</>}
+                      </Button>
+                    )}
                     {canManage && <Button variant="outline" onClick={startEdit}><Pencil className="h-4 w-4 mr-2" />Edit</Button>}
                   </div>
                 </>

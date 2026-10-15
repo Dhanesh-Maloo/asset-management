@@ -33,6 +33,18 @@ import Reservations from './pages/Reservations';
 import InviteAccept from './pages/InviteAccept';
 import MasterQRs from './pages/MasterQRs';
 import MasterQRDetail from './pages/MasterQRDetail';
+import PublicMasterQR from './pages/PublicMasterQR';
+import { useAuth } from './contexts/AuthContext';
+
+// Staff get the full detail page; everyone else gets the public, no-login view.
+const MasterQRRoute = () => {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" /></div>;
+  }
+  const isStaff = ['super_admin', 'tenant_admin', 'asset_manager', 'helpdesk_agent'].includes(user?.role);
+  return isStaff ? <MasterQRDetail /> : <PublicMasterQR />;
+};
 import NotFound from './pages/NotFound';
 import './index.css';
 
@@ -101,11 +113,7 @@ function AppRouter() {
 
             <Route
               path="/master-qr/:masterId"
-              element={
-                <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager', 'helpdesk_agent']}>
-                  <MasterQRDetail />
-                </ProtectedRoute>
-              }
+              element={<MasterQRRoute />}
             />
 
             <Route
