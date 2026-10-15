@@ -38,6 +38,8 @@ function parseLink(value) {
   const base = { kind: 'link', assetId: '', serial: '', tag: '', host: url.hostname };
 
   // This app's own label: …/assets/<id>
+  const master = url.pathname.match(/\/master-qr\/([^/]+)\/?$/);
+  if (master) return { ...base, masterId: decodeURIComponent(master[1]) };
   const own = url.pathname.match(/\/assets\/([^/]+)\/?$/);
   if (own) return { ...base, assetId: decodeURIComponent(own[1]) };
 

@@ -3786,6 +3786,120 @@ async def delete_location(location_id: str, current_user: User = Depends(get_cur
     return {"message": "Location deleted"}
 
 # ═══════════════════════════════════════════════════════════════════════════
+# MASTER QR (one QR code for a group of assets, e.g. everything in a room)
+# ═══════════════════════════════════════════════════════════════════════════
+
+MASTER_QR_VIEW_ROLES = [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]
+MASTER_QR_MANAGE_ROLES = [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
+
+class MasterQRCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    location: str = Field("", max_length=200)
+    asset_ids: List[str] = Field(..., min_length=1, max_length=500)
+
+class MasterQRUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    location: Optional[str] = Field(None, max_length=200)
+    asset_ids: Optional[List[str]] = Field(None, max_length=500)
+
+def _master_qr_scope(current_user: User) -> dict:
+    return {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+
+async def _live_assets_for(asset_ids: List[str], scope: dict) -> List[dict]:
+    """Fetch non-deleted assets (tenant scoped) in the order of asset_ids, with product names attached."""
+    assets = await db.assets.find({"id": {"$in": asset_ids}, "is_deleted": {"$ne": True}, **scope}, {"_id": 0}).to_list(len(asset_ids) or 1)
+    product_ids = list({a.get("product_id") for a in assets if a.get("product_id")})
+    products = await db.products.find({"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(product_ids) or 1)
+    names = {p["id"]: p.get("name", "") for p in products}
+    order = {aid: i for i, aid in enumerate(asset_ids)}
+    for a in assets:
+        a["product_name"] = names.get(a.get("product_id"), "")
+    assets.sort(key=lambda a: order.get(a["id"], 0))
+    return assets
+
+@api_router.post("/master-qrs")
+async def create_master_qr(body: MasterQRCreate, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in MASTER_QR_MANAGE_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    ids = list(dict.fromkeys(body.asset_ids))
+    assets = await _live_assets_for(ids, _master_qr_scope(current_user))
+    if len(assets) != len(ids):
+        raise HTTPException(status_code=404, detail="Some selected assets were not found")
+    tenant_id = current_user.tenant_id or assets[0].get("tenant_id")
+    if any(a.get("tenant_id") != tenant_id for a in assets):
+        raise HTTPException(status_code=400, detail="Assets must all belong to the same organization")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": body.name.strip(),
+        "location": body.location.strip(),
+        "asset_ids": ids,
+        "tenant_id": tenant_id,
+        "created_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.master_qrs.insert_one(dict(doc))
+    await write_audit_log(current_user.id, "create", "master_qr", doc["id"], f"{doc['name']} ({len(ids)} assets)", tenant_id=tenant_id)
+    return {**doc, "asset_count": len(ids)}
+
+@api_router.get("/master-qrs")
+async def list_master_qrs(current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in MASTER_QR_VIEW_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    docs = await db.master_qrs.find(_master_qr_scope(current_user), {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for d in docs:
+        d["asset_count"] = len(d.get("asset_ids", []))
+    return docs
+
+@api_router.get("/master-qrs/{master_id}")
+async def get_master_qr(master_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in MASTER_QR_VIEW_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    scope = _master_qr_scope(current_user)
+    doc = await db.master_qrs.find_one({"id": master_id, **scope}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Master QR not found")
+    doc["assets"] = await _live_assets_for(doc.get("asset_ids", []), scope)
+    doc["asset_count"] = len(doc["assets"])
+    return doc
+
+@api_router.put("/master-qrs/{master_id}")
+async def update_master_qr(master_id: str, body: MasterQRUpdate, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in MASTER_QR_MANAGE_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    scope = _master_qr_scope(current_user)
+    doc = await db.master_qrs.find_one({"id": master_id, **scope}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Master QR not found")
+    updates: dict = {}
+    if body.name is not None:
+        updates["name"] = body.name.strip()
+    if body.location is not None:
+        updates["location"] = body.location.strip()
+    if body.asset_ids is not None:
+        ids = list(dict.fromkeys(body.asset_ids))
+        if not ids:
+            raise HTTPException(status_code=400, detail="A master QR needs at least one asset")
+        assets = await _live_assets_for(ids, {"tenant_id": doc["tenant_id"]})
+        if len(assets) != len(ids):
+            raise HTTPException(status_code=404, detail="Some assets were not found")
+        updates["asset_ids"] = ids
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.master_qrs.update_one({"id": master_id, **scope}, {"$set": updates})
+    await write_audit_log(current_user.id, "update", "master_qr", master_id, tenant_id=doc["tenant_id"])
+    return {"message": "Master QR updated"}
+
+@api_router.delete("/master-qrs/{master_id}")
+async def delete_master_qr(master_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in MASTER_QR_MANAGE_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    result = await db.master_qrs.delete_one({"id": master_id, **_master_qr_scope(current_user)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Master QR not found")
+    await write_audit_log(current_user.id, "delete", "master_qr", master_id, tenant_id=current_user.tenant_id)
+    return {"message": "Master QR deleted"}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # VENDOR MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -5280,6 +5394,7 @@ async def startup_db_client():
     await db.users.create_index("email", unique=True, background=True)
     await db.users.create_index("tenant_id", background=True)
     await db.assets.create_index("tenant_id", background=True)
+    await db.master_qrs.create_index("tenant_id", background=True)
     await db.assets.create_index("status", background=True)
     await db.assets.create_index("assigned_to", background=True)
     await db.products.create_index("tenant_id", background=True)

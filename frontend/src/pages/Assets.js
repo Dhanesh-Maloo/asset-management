@@ -14,10 +14,11 @@ import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../components/ui/collapsible';
 import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
-import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera } from 'lucide-react';
+import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera, QrCode } from 'lucide-react';
 import { BarcodeScannerDialog } from '../components/BarcodeScannerDialog';
 import { ScanToAddDialog } from '../components/ScanToAddDialog';
 import { LabelPhotoDialog } from '../components/LabelPhotoDialog';
+import { MasterQRDialog } from '../components/MasterQRDialog';
 import { parseScannedValue } from '../lib/scanParse';
 import { toast } from 'sonner';
 
@@ -343,6 +344,7 @@ const Assets = () => {
     const value = (raw || '').trim();
     if (!value) return;
     const parsed = parseScannedValue(value);
+    if (parsed.masterId && scanTarget === 'lookup') { navigate(`/master-qr/${parsed.masterId}`); return; }
     const noSerial = () => toast.error(
       parsed.kind === 'link'
         ? `That QR code is a link (${parsed.host}) with no serial number in it. Scan the serial barcode instead.`
@@ -443,6 +445,7 @@ const Assets = () => {
   const [bulkLocation, setBulkLocation] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDispatchOpen, setBulkDispatchOpen] = useState(false);
+  const [masterQrOpen, setMasterQrOpen] = useState(false);
   const [bulkDispatchUserId, setBulkDispatchUserId] = useState('');
   const [bulkDispatchNotes, setBulkDispatchNotes] = useState('');
   const [bulkDispatching, setBulkDispatching] = useState(false);
@@ -553,6 +556,10 @@ const Assets = () => {
               <button onClick={handlePrintLabels}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors">
                 <Printer className="h-3.5 w-3.5" /> Print Labels
+              </button>
+              <button onClick={() => setMasterQrOpen(true)} data-testid="master-qr-btn"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors">
+                <QrCode className="h-3.5 w-3.5" /> Master QR
               </button>
               {allSelectedAvailable && (
                 <button onClick={() => setBulkDispatchOpen(true)} data-testid="bulk-dispatch-btn"
@@ -1080,6 +1087,8 @@ const Assets = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MasterQRDialog open={masterQrOpen} onOpenChange={setMasterQrOpen} assets={selectedAssetsForDispatch} onCreated={() => setSelectedIds([])} />
 
       {/* Bulk Edit Dialog */}
       <Dialog open={bulkEditOpen} onOpenChange={setBulkEditOpen}>
