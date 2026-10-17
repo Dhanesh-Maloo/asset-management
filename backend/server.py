@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import asyncio
+import contextvars
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 from typing import List, Optional
@@ -319,6 +320,14 @@ class ProductCreate(BaseModel):
     stock: int = Field(0, ge=0)
     price: float = Field(..., gt=0, description="Price must be greater than 0")
     tenant_id: Optional[str] = None
+
+class ProductUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    category: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=2000)
+    image_url: Optional[str] = Field(None, max_length=500)
+    stock: Optional[int] = Field(None, ge=0)
+    price: Optional[float] = Field(None, gt=0)
 
 class Order(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1209,9 +1218,19 @@ def check_rate_limit(ip: str, store: dict = _rate_limit_store):
 
 # ── Audit log helper ──────────────────────────────────────────────────────────
 async def write_audit_log(user_id: str, action: str, resource: str, resource_id: str, details: str = "", tenant_id: Optional[str] = None):
+    holder = _audit_written.get()
+    label = None
+    if holder is not None:
+        holder["done"] = True
+        label = holder.get("label")
+        if label and label not in (details or ""):
+            base = details or f"{action.replace('_', ' ').title()} {resource.replace('_', ' ')}"
+            details = f"{base}: {label}"
     await db.audit_log.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user_id,
+        "user_name": await _audit_user_name(user_id),
+        "item_name": label,
         "tenant_id": tenant_id,
         "action": action,
         "resource": resource,
@@ -1219,6 +1238,65 @@ async def write_audit_log(user_id: str, action: str, resource: str, resource_id:
         "details": details,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
+
+
+async def _audit_user_name(user_id: Optional[str]) -> Optional[str]:
+    """Snapshot of the actor's name, so the log still names them if the account is later removed."""
+    if not user_id:
+        return None
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "email": 1})
+    return (u.get("name") or u.get("email")) if u else None
+
+
+def _assert_same_tenant(current_user, record_tenant_id):
+    """Non-super-admins may only act on records of their own tenant."""
+    if current_user.role != UserRole.SUPER_ADMIN and record_tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+# ── Generic audit trail: auto-log every successful write so the Activity Feed is complete
+_audit_written: contextvars.ContextVar = contextvars.ContextVar("audit_written", default=None)
+_UUID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
+_AUDIT_SKIP_PREFIXES = ("/api/auth/", "/api/payments/")
+_AUDIT_VERBS = {"POST": "create", "PUT": "update", "PATCH": "update", "DELETE": "delete"}
+_AUDIT_SUBACTIONS = {"assign", "checkout", "return", "dispatch", "reject", "dispose", "complete",
+                     "checker-approve", "approver-approve", "cancel", "approve"}
+
+_AUDIT_COLLECTIONS = {
+    "asset": "assets", "product": "products", "order": "orders", "ticket": "tickets", "user": "users",
+    "license": "licenses", "vendor": "vendors", "department": "departments", "location": "locations",
+    "group": "groups", "master-qr": "master_qrs", "master_qr": "master_qrs", "reservation": "reservations",
+    "amc": "amc_contracts", "maintenance": "maintenance_schedules", "tenant": "tenants",
+    "custom-field": "custom_fields", "subscription-tier": "subscription_tiers",
+}
+_AUDIT_LABEL_FIELDS = ("name", "title", "asset_name", "asset_tag", "serial_number", "email")
+
+async def _audit_item_label(resource: str, resource_id: str) -> Optional[str]:
+    """Name of the record about to be changed/deleted (captured before it disappears)."""
+    coll = _AUDIT_COLLECTIONS.get(resource)
+    if not coll or not resource_id:
+        return None
+    doc = await db[coll].find_one({"id": resource_id})
+    if not doc:
+        return None
+    return next((str(doc[f]) for f in _AUDIT_LABEL_FIELDS if doc.get(f)), None)
+
+def _audit_from_path(method: str, path: str):
+    parts = [p for p in path.split("/") if p][1:]  # drop "api"
+    if not parts:
+        return None
+    resource_id = next((p for p in parts if _UUID_RE.match(p)), "")
+    words = [p for p in parts if not _UUID_RE.match(p)]
+    action = _AUDIT_VERBS.get(method, method.lower())
+    if len(words) > 1 and words[-1] in _AUDIT_SUBACTIONS:
+        action = words[-1].replace("-", "_")
+        words = words[:-1]
+    elif len(words) > 1 and words[-1].startswith("bulk"):
+        action = words[-1].replace("-", "_")
+        words = words[:-1]
+    resource = words[0].rstrip("s") if words else "system"
+    if resource.endswith("ie"):
+        resource = resource[:-2] + "y"
+    return action, resource, resource_id
 
 # ── Password complexity check ─────────────────────────────────────────────────
 def validate_password_strength(password: str):
@@ -1842,7 +1920,86 @@ async def create_product(product_data: ProductCreate, current_user: User = Depen
 
     product = Product(**product_dict)
     await db.products.insert_one(product.model_dump())
+    await write_audit_log(current_user.id, "create", "product", product.id,
+                          f"{product.name} ({product.category}) - stock {product.stock}", tenant_id=current_user.tenant_id)
     return product
+
+_PRODUCT_IMAGE_MAGIC = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png", b"GIF8": "image/gif"}
+MAX_PRODUCT_IMAGE_BYTES = 2 * 1024 * 1024
+
+def _sniff_image_type(data: bytes) -> Optional[str]:
+    for magic, mime in _PRODUCT_IMAGE_MAGIC.items():
+        if data.startswith(magic):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+@api_router.post("/products/upload-image")
+async def upload_product_image(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    """Upload a product picture; returns a URL to store in the product's image_url."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    data = await file.read()
+    if len(data) > MAX_PRODUCT_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Image too large. Maximum size is 2 MB.")
+    mime = _sniff_image_type(data)
+    if not mime:
+        raise HTTPException(status_code=400, detail="Unsupported image. Use JPG, PNG, GIF or WebP.")
+    image_id = str(uuid.uuid4())
+    await db.product_images.insert_one({
+        "id": image_id, "content_type": mime, "data": data,
+        "tenant_id": current_user.tenant_id, "uploaded_by": current_user.id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"image_url": f"/api/products/images/{image_id}"}
+
+@api_router.get("/products/images/{image_id}")
+async def get_product_image(image_id: str):
+    """Public (unguessable id) so <img> tags can load it without an auth header."""
+    doc = await db.product_images.find_one({"id": image_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return Response(content=bytes(doc["data"]), media_type=doc["content_type"],
+                    headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"})
+
+@api_router.put("/products/{product_id}", response_model=Product)
+async def update_product(product_id: str, body: ProductUpdate, current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    product = await db.products.find_one({"id": product_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    # Tenant admins/managers may edit only their own products (global ones belong to super admin)
+    if current_user.role != UserRole.SUPER_ADMIN and product.get("tenant_id") != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="You can only edit your organisation's products")
+
+    changes = body.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if "name" in changes and changes["name"].lower() != product["name"].lower():
+        dup = await db.products.find_one({
+            "id": {"$ne": product_id}, "is_deleted": {"$ne": True},
+            "name": {"$regex": f"^{re.escape(changes['name'])}$", "$options": "i"},
+            "$or": [{"tenant_id": product.get("tenant_id")}, {"tenant_id": None}, {"tenant_id": {"$exists": False}}],
+        }, {"_id": 0, "name": 1})
+        if dup:
+            raise HTTPException(status_code=409, detail=f"A product named '{dup['name']}' already exists.")
+
+    # Prices are stored in USD; the form sends the tenant's currency (same as create)
+    if "price" in changes and product.get("tenant_id"):
+        tenant = await db.tenants.find_one({"id": product["tenant_id"]}, {"_id": 0})
+        tenant_currency = tenant.get("settings", {}).get("currency") if tenant else None
+        if tenant_currency and tenant_currency != "USD":
+            rate = (await get_exchange_rates()).get(tenant_currency, 1.0)
+            changes["price"] = round(changes["price"] / rate, 2)
+
+    await db.products.update_one({"id": product_id}, {"$set": changes})
+    updated = await db.products.find_one({"id": product_id}, {"_id": 0})
+    await write_audit_log(current_user.id, "update", "product", product_id,
+                          f"{updated['name']} - changed {', '.join(sorted(changes.keys()))}", tenant_id=current_user.tenant_id)
+    return Product(**updated)
 
 @api_router.get("/products")
 async def get_products(
@@ -1873,7 +2030,7 @@ async def get_products(
         query["category"] = {"$regex": category, "$options": "i"}
     
     skip = (page - 1) * limit
-    products = await db.products.find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    products = await db.products.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     
     # Fetch live exchange rates (cached for 1 hour, falls back to hardcoded values)
     conversion_rates = await get_exchange_rates()
@@ -1898,8 +2055,10 @@ async def get_products(
 
 @api_router.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: str, current_user: User = Depends(get_current_user)):
-    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    product = await db.products.find_one({"id": product_id, "is_deleted": {"$ne": True}}, {"_id": 0})
     if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.get("tenant_id") and current_user.role != UserRole.SUPER_ADMIN and product["tenant_id"] != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Product not found")
     return Product(**product)
 
@@ -2001,6 +2160,13 @@ async def bulk_import_products(file: UploadFile = File(...), current_user: User 
 @api_router.post("/orders", response_model=Order)
 async def create_order(order_data: OrderCreate, current_user: User = Depends(get_current_user)):
     await check_tier_limit(current_user.tenant_id, "orders")
+    if order_data.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    prod = await db.products.find_one({"id": order_data.product_id, "is_deleted": {"$ne": True}}, {"_id": 0, "stock": 1})
+    if not prod:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if order_data.quantity > prod.get("stock", 0):
+        raise HTTPException(status_code=400, detail=f"Only {prod.get('stock', 0)} in stock")
     order = Order(
         **order_data.model_dump(),
         tenant_id=current_user.tenant_id or "default",
@@ -2051,7 +2217,14 @@ async def update_order(order_id: str, order_update: OrderUpdate, current_user: U
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+    _assert_same_tenant(current_user, order.get("tenant_id"))
+    if order.get("status") != OrderStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Order is already {order.get('status')} and can no longer be changed this way")
+    if order_update.status == OrderStatus.APPROVED:
+        workflow = await db.approval_workflows.find_one({"tenant_id": order.get("tenant_id"), "entity_type": "order"}, {"_id": 0})
+        if workflow and workflow.get("requires_checker") and order.get("approval_stage") != ApprovalStage.CHECKER:
+            raise HTTPException(status_code=400, detail="Checker approval required before final approval")
+
     update_data = order_update.model_dump(exclude_unset=True)
     if order_update.status in [OrderStatus.APPROVED, OrderStatus.REJECTED]:
         update_data["approved_by"] = current_user.id
@@ -2512,6 +2685,7 @@ async def checker_approve_order(order_id: str, comments: str = "", current_user:
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _assert_same_tenant(current_user, order.get("tenant_id"))
 
     # Validate: order must be in pending stage before checker can act
     if order.get("status") != OrderStatus.PENDING:
@@ -2549,6 +2723,7 @@ async def approver_approve_order(order_id: str, comments: str = "", current_user
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _assert_same_tenant(current_user, order.get("tenant_id"))
 
     # Validate stage: checker must have approved before approver can act
     workflow = await db.approval_workflows.find_one(
@@ -2556,10 +2731,8 @@ async def approver_approve_order(order_id: str, comments: str = "", current_user
     )
     if workflow and workflow.get("requires_checker") and order.get("approval_stage") != ApprovalStage.CHECKER:
         raise HTTPException(status_code=400, detail="Checker approval required before final approval")
-    if order.get("status") == OrderStatus.APPROVED:
-        raise HTTPException(status_code=400, detail="Order is already approved")
-    if order.get("status") == OrderStatus.REJECTED:
-        raise HTTPException(status_code=400, detail="Cannot approve a rejected order")
+    if order.get("status") != OrderStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Order is already {order.get('status')} and cannot be approved")
 
     qty = order.get("quantity", 1)
     stock_result = await db.products.find_one_and_update(
@@ -2603,7 +2776,13 @@ async def reject_order(order_id: str, rejection_reason: str, current_user: User 
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+    _assert_same_tenant(current_user, order.get("tenant_id"))
+    if order.get("status") not in (OrderStatus.PENDING, OrderStatus.APPROVED):
+        raise HTTPException(status_code=400, detail=f"A {order.get('status')} order cannot be rejected")
+    if order.get("status") == OrderStatus.APPROVED:
+        # stock was reserved on approval - give it back
+        await db.products.update_one({"id": order["product_id"]}, {"$inc": {"stock": order.get("quantity", 1)}})
+
     update_data = {
         "status": OrderStatus.REJECTED,
         "rejection_reason": rejection_reason
@@ -2732,6 +2911,11 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
 
 @api_router.get("/approval-history/{entity_id}")
 async def get_approval_history(entity_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        order = await db.orders.find_one({"id": entity_id}, {"_id": 0, "tenant_id": 1, "user_id": 1})
+        if order and (order.get("tenant_id") != current_user.tenant_id
+                      or (current_user.role == UserRole.EMPLOYEE and order.get("user_id") != current_user.id)):
+            raise HTTPException(status_code=403, detail="Access denied")
     history = await db.approval_history.find({"entity_id": entity_id}, {"_id": 0}).to_list(100)
     return [ApprovalHistory(**h) for h in history]
 
@@ -3360,8 +3544,11 @@ async def delete_order(order_id: str, current_user: User = Depends(get_current_u
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    _assert_same_tenant(current_user, order.get("tenant_id"))
     if order.get("status") == OrderStatus.FULFILLED:
         raise HTTPException(status_code=400, detail="Cannot delete a fulfilled order")
+    if order.get("status") == OrderStatus.APPROVED:
+        await db.products.update_one({"id": order["product_id"]}, {"$inc": {"stock": order.get("quantity", 1)}})
     await db.orders.delete_one({"id": order_id})
     await write_audit_log(current_user.id, "delete", "order", order_id, tenant_id=current_user.tenant_id)
     return {"message": "Order deleted successfully"}
@@ -3706,7 +3893,8 @@ async def get_audit_log(
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
     skip = (page - 1) * limit
-    logs = await db.audit_log.find({}, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
+    query: dict = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    logs = await db.audit_log.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
     return logs
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -4596,6 +4784,19 @@ async def get_activity_feed(
             ts_filter["$lte"] = date_to
         query["timestamp"] = ts_filter
     activities = await db.audit_log.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
+    uids = list({a["user_id"] for a in activities if a.get("user_id")})
+    names = {}
+    if uids:
+        async for u in db.users.find({"id": {"$in": uids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+            names[u["id"]] = u.get("name") or u.get("email") or "Unknown"
+    tids = list({a["tenant_id"] for a in activities if a.get("tenant_id")})
+    tenant_names = {}
+    if tids:
+        async for t in db.tenants.find({"id": {"$in": tids}}, {"_id": 0, "id": 1, "name": 1}):
+            tenant_names[t["id"]] = t.get("name")
+    for a in activities:
+        a["tenant_name"] = tenant_names.get(a.get("tenant_id"))
+        a["user_name"] = a.get("user_name") or names.get(a.get("user_id")) or "System"
     return activities
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5414,6 +5615,47 @@ async def list_invites(current_user: User = Depends(get_current_user)):
 
 # Include router
 app.include_router(api_router)
+
+@app.middleware("http")
+async def audit_trail_middleware(request: Request, call_next):
+    """Record every successful write in the audit log (unless the endpoint already did)."""
+    path, method = request.url.path, request.method
+    if method not in _AUDIT_VERBS or not path.startswith("/api/") or path.startswith(_AUDIT_SKIP_PREFIXES):
+        return await call_next(request)
+    holder = {"done": False, "label": None}
+    if method != "POST":
+        try:
+            pre = _audit_from_path(method, path)
+            if pre:
+                holder["label"] = await _audit_item_label(pre[1], pre[2])
+        except Exception as exc:
+            logging.warning(f"Audit label lookup skipped: {exc}")
+    token = _audit_written.set(holder)
+    try:
+        response = await call_next(request)
+    finally:
+        _audit_written.reset(token)
+    if response.status_code < 400 and not holder["done"]:
+        try:
+            parsed = _audit_from_path(method, path)
+            user = await get_current_user_hybrid(request)
+            if parsed and user:
+                action, resource, resource_id = parsed
+                details = f"{action.replace('_', ' ').title()} {resource.replace('_', ' ')}"
+                if holder["label"]:
+                    details += f": {holder['label']}"
+                await db.audit_log.insert_one({
+                    "id": str(uuid.uuid4()), "user_id": user.id,
+                    "user_name": getattr(user, "name", None) or getattr(user, "email", None),
+                    "item_name": holder["label"],
+                    "tenant_id": user.tenant_id,
+                    "action": action, "resource": resource, "resource_id": resource_id,
+                    "details": details,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as exc:  # never break a request because auditing failed
+            logging.warning(f"Audit trail skipped: {exc}")
+    return response
 
 app.add_middleware(
     CORSMiddleware,

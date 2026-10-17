@@ -13,6 +13,8 @@ const ACTION_ICONS = {
   assign: '👤', checkout: '📤', return: '📥', approve: '✅', reject: '❌',
   bulk_delete: '🗑️', bulk_update: '✏️', transfer_complete: '🔄',
   trigger_alerts: '🔔', change_password: '🔒',
+  dispatch: '🚚', checker_approve: '✅', approver_approve: '✅', dispose: '♻️',
+  complete: '🏁', bulk_create: '✨', bulk_dispatch: '🚚',
 };
 
 const ACTION_COLORS = {
@@ -20,7 +22,17 @@ const ACTION_COLORS = {
   bulk_delete: 'bg-red-500/10 text-red-700 dark:text-red-400', create: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
   approve: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', reject: 'bg-red-500/10 text-red-700 dark:text-red-400',
   update: 'bg-amber-500/10 text-amber-700 dark:text-amber-400', assign: 'bg-violet-500/10 text-violet-700 dark:text-violet-400',
+  dispatch: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400', checker_approve: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  approver_approve: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', bulk_create: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
   checkout: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400', return: 'bg-teal-500/10 text-teal-700 dark:text-teal-400',
+};
+
+const PAST_TENSE = {
+  create: 'added', update: 'edited', delete: 'deleted', login: 'logged in', assign: 'assigned',
+  bulk_create: 'bulk added', bulk_update: 'bulk edited', bulk_delete: 'bulk deleted',
+  checkout: 'checked out', return: 'returned', dispatch: 'dispatched', reject: 'rejected',
+  dispose: 'disposed', complete: 'completed', approve: 'approved',
+  checker_approve: 'approved (checker)', approver_approve: 'approved (approver)',
 };
 
 function timeAgo(dateStr) {
@@ -138,7 +150,7 @@ const ActivityFeed = () => {
               className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
             >
               <option value="">All Actions</option>
-              {['login','create','update','delete','assign','checkout','return','approve','reject','bulk_delete','bulk_update','change_password'].map(a => (
+              {['login','create','update','delete','assign','checkout','return','dispatch','checker_approve','approver_approve','reject','dispose','complete','bulk_create','bulk_delete','bulk_update','change_password'].map(a => (
                 <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
               ))}
             </select>
@@ -151,7 +163,7 @@ const ActivityFeed = () => {
               className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
             >
               <option value="">All Resources</option>
-              {['asset','ticket','order','user','product','license','vendor'].map(r => (
+              {['asset','product','order','ticket','user','license','vendor','department','location','group','master_qr','maintenance','reservation','transfer','amc'].map(r => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
@@ -215,7 +227,7 @@ const ActivityFeed = () => {
                     const icon = ACTION_ICONS[act.action] || '📋';
                     const colorClass = ACTION_COLORS[act.action] || 'bg-muted text-slate-600';
                     return (
-                      <div key={i} className="flex items-start gap-3 p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow">
+                      <div key={act.id || i} className="flex items-start gap-3 p-3 bg-white border border-border rounded-xl hover:shadow-sm transition-shadow">
                         <div className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-lg flex-shrink-0">
                           {icon}
                         </div>
@@ -224,10 +236,22 @@ const ActivityFeed = () => {
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${colorClass}`}>
                               {act.action?.replace(/_/g, ' ')}
                             </span>
-                            <span className="text-xs text-slate-400 capitalize">{act.resource}</span>
+                            <span className="text-xs text-slate-400 capitalize">{act.resource?.replace(/_/g, ' ')}</span>
+                            {act.tenant_name && (
+                              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                🏢 {act.tenant_name}
+                              </span>
+                            )}
                           </div>
+                          <p className="text-sm text-slate-700 mt-1">
+                            <span className="font-semibold text-slate-900">{act.user_name || 'System'}</span>
+                            {act.tenant_name && <> from <span className="font-semibold text-slate-900">{act.tenant_name}</span></>}
+                            {' '}{PAST_TENSE[act.action] || act.action?.replace(/_/g, ' ')}{' '}
+                            <span className="lowercase">{act.resource?.replace(/_/g, ' ')}</span>
+                            {act.item_name && <> <span className="font-semibold text-slate-900">"{act.item_name}"</span></>}
+                          </p>
                           {act.details && (
-                            <p className="text-sm text-slate-600 mt-1 truncate">{act.details}</p>
+                            <p className="text-sm text-slate-600 mt-1 break-words">{act.details}</p>
                           )}
                           <p className="text-xs text-slate-400 mt-1">{timeAgo(act.timestamp)}</p>
                         </div>
