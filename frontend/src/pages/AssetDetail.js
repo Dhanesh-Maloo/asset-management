@@ -524,8 +524,12 @@ const AssetDetail = () => {
               <p className="text-sm text-muted-foreground">{product?.name || 'Unknown Product'}</p>
             </div>
           </div>
-          {canManage && (
-            <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => navigate(`/tickets?asset=${asset.id}`)} data-testid="report-issue-btn">
+              <AlertCircle className="h-4 w-4 mr-2" />
+              Report Issue
+            </Button>
+          {canManage && (<>
               {asset.status === 'checked_out' ? (
                 <Button onClick={() => setReturnDialogOpen(true)} data-testid="return-asset-btn">
                   <ReturnIcon className="h-4 w-4 mr-2" />
@@ -547,8 +551,8 @@ const AssetDetail = () => {
                   Dispose
                 </Button>
               )}
-            </div>
-          )}
+          </>)}
+          </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">

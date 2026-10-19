@@ -8,7 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from 'recharts';
-import { FileBarChart, Download, AlertTriangle, Laptop, Wrench, TrendingDown, Printer } from 'lucide-react';
+import { FileBarChart, Download, AlertTriangle, Laptop, Wrench, TrendingDown, Printer, Mail } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -63,6 +63,20 @@ const Reports = () => {
     window.print();
   };
 
+  const [emailing, setEmailing] = useState(false);
+  const emailSummary = async () => {
+    setEmailing(true);
+    try {
+      const res = await axios.post(`${API}/reports/summary/send-me`);
+      if (res.data.sent) toast.success('Summary emailed to you');
+      else toast.error('Email is not set up on the server yet, so nothing was sent');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to send summary');
+    } finally {
+      setEmailing(false);
+    }
+  };
+
   return (
     <DashboardLayout>
       <style>{`@media print { nav, aside, header, .print\\:hidden { display: none !important; } body { background: white; } }`}</style>
@@ -74,8 +88,12 @@ const Reports = () => {
             </h1>
             <p className="text-sm text-muted-foreground">Advanced analytics and insights</p>
           </div>
-          {data && data.length > 0 && (
-            <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
+            <button onClick={emailSummary} disabled={emailing} data-testid="email-summary-btn"
+              className="flex items-center gap-2 h-9 px-3 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors disabled:opacity-50 print:hidden">
+              <Mail className="h-4 w-4" /> {emailing ? 'Sending...' : 'Email me summary'}
+            </button>
+          {data && data.length > 0 && (<>
               <button onClick={downloadCSV}
                 className="flex items-center gap-2 h-9 px-3 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary-hover transition-colors">
                 <Download className="h-4 w-4" /> Export CSV
@@ -84,8 +102,8 @@ const Reports = () => {
                 className="flex items-center gap-2 h-9 px-3 bg-card border border-border text-sm font-medium rounded-md hover:bg-accent transition-colors print:hidden">
                 <Printer className="h-4 w-4" /> Save as PDF
               </button>
-            </div>
-          )}
+          </>)}
+          </div>
         </div>
 
         {/* Report Tabs */}
@@ -157,26 +175,35 @@ const Reports = () => {
                   </CardContent>
                 </Card>
                 <Card className="lg:col-span-2">
-                  <CardHeader><CardTitle>Department Summary</CardTitle></CardHeader>
+                  <CardHeader><CardTitle>Department Cost Summary</CardTitle></CardHeader>
                   <CardContent>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead><tr className="border-b">
                           <th className="text-left py-2 font-semibold text-slate-600">Department</th>
                           <th className="text-right py-2 font-semibold text-slate-600">Assets</th>
-                          <th className="text-right py-2 font-semibold text-slate-600">Total Value</th>
+                          <th className="text-right py-2 font-semibold text-slate-600">Purchase Value</th>
+                          <th className="text-right py-2 font-semibold text-slate-600">Current Value</th>
+                          <th className="text-right py-2 font-semibold text-slate-600">Depreciation</th>
+                          <th className="text-right py-2 font-semibold text-slate-600">AMC / year</th>
                         </tr></thead>
                         <tbody>{data.map((d, i) => (
                           <tr key={i} className="border-b border-slate-50 hover:bg-muted/50">
                             <td className="py-2">{d.department}</td>
                             <td className="py-2 text-right font-medium">{d.asset_count}</td>
                             <td className="py-2 text-right">₹{d.total_value.toLocaleString()}</td>
+                            <td className="py-2 text-right text-green-700">₹{(d.current_value || 0).toLocaleString()}</td>
+                            <td className="py-2 text-right text-red-600">₹{(d.depreciation || 0).toLocaleString()}</td>
+                            <td className="py-2 text-right">₹{(d.amc_annual_cost || 0).toLocaleString()}</td>
                           </tr>
                         ))}</tbody>
                         <tfoot><tr className="font-bold border-t-2">
                           <td className="py-2">Total</td>
                           <td className="py-2 text-right">{data.reduce((s, d) => s + d.asset_count, 0)}</td>
                           <td className="py-2 text-right">₹{data.reduce((s, d) => s + d.total_value, 0).toLocaleString()}</td>
+                          <td className="py-2 text-right text-green-700">₹{data.reduce((s, d) => s + (d.current_value || 0), 0).toLocaleString()}</td>
+                          <td className="py-2 text-right text-red-600">₹{data.reduce((s, d) => s + (d.depreciation || 0), 0).toLocaleString()}</td>
+                          <td className="py-2 text-right">₹{data.reduce((s, d) => s + (d.amc_annual_cost || 0), 0).toLocaleString()}</td>
                         </tr></tfoot>
                       </table>
                     </div>

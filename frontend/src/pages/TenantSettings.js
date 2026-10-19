@@ -423,10 +423,10 @@ const TenantSettings = () => {
                   <div>
                     <p className="text-sm font-medium flex items-center gap-2">
                       <Mail className="h-4 w-4 text-indigo-500" />
-                      Email (SendGrid)
+                      Email (ZeptoMail)
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Used for password reset and user invite emails. Powered by SendGrid — configured and active.
+                      Used for password reset, user invites and alert emails. Sent through Zoho ZeptoMail; use Send Test Email to check it works.
                     </p>
                   </div>
                   <Button

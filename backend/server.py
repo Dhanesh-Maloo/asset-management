@@ -49,9 +49,12 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production'
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-# Email (SendGrid SMTP)
-SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
+# Email (Zoho ZeptoMail HTTP API). Use the API URL of your ZeptoMail region
+# (api.zeptomail.com / .in / .eu / .com.au / .jp) and a FROM_EMAIL on a verified domain.
+ZEPTOMAIL_TOKEN = os.environ.get('ZEPTOMAIL_TOKEN', '')
+ZEPTOMAIL_API_URL = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.com/v1.1/email')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', '')
+FROM_NAME = os.environ.get('FROM_NAME', 'Asset Management')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
 
@@ -470,6 +473,10 @@ class Ticket(BaseModel):
     priority: TicketPriority = TicketPriority.MEDIUM
     status: TicketStatus = TicketStatus.OPEN
     category: str = "general"
+    asset_id: Optional[str] = None
+    asset_tag: str = ""
+    sla_due_at: Optional[str] = None
+    resolved_at: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -478,6 +485,7 @@ class TicketCreate(BaseModel):
     description: str = Field(..., min_length=1, max_length=5000)
     priority: TicketPriority = TicketPriority.MEDIUM
     category: str = Field("general", max_length=100)
+    asset_id: Optional[str] = Field(None, max_length=100)
 
 class TicketUpdate(BaseModel):
     status: Optional[TicketStatus] = None
@@ -947,26 +955,31 @@ async def get_current_user_hybrid(request: Request):
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 
-# ── Helper: send email via SendGrid HTTP API ─────────────────────────────────
+# ── Helper: send email via Zoho ZeptoMail HTTP API ───────────────────────────
+def _zeptomail_auth_header() -> str:
+    """ZeptoMail shows the token either with or without its 'Zoho-enctoken' prefix; accept both."""
+    token = ZEPTOMAIL_TOKEN.strip()
+    return token if token.lower().startswith("zoho-enctoken") else f"Zoho-enctoken {token}"
+
 async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Send email via SendGrid HTTP API (port 443 — works on Railway)."""
-    if not SENDGRID_API_KEY or not FROM_EMAIL:
-        logging.warning("SendGrid not configured — skipping email")
+    """Send email via the ZeptoMail HTTP API (port 443)."""
+    if not ZEPTOMAIL_TOKEN or not FROM_EMAIL:
+        logging.warning("ZeptoMail not configured (ZEPTOMAIL_TOKEN / FROM_EMAIL) — skipping email")
         return False
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {SENDGRID_API_KEY}"},
+            ZEPTOMAIL_API_URL,
+            headers={"Authorization": _zeptomail_auth_header(), "Accept": "application/json", "Content-Type": "application/json"},
             json={
-                "personalizations": [{"to": [{"email": to_email}]}],
-                "from": {"email": FROM_EMAIL},
+                "from": {"address": FROM_EMAIL, "name": FROM_NAME},
+                "to": [{"email_address": {"address": to_email}}],
                 "subject": subject,
-                "content": [{"type": "text/html", "value": html_body}],
+                "htmlbody": html_body,
             },
         )
         if not resp.is_success:
-            raise Exception(f"SendGrid API error {resp.status_code}: {resp.text}")
-    logging.info(f"Email '{subject}' sent to {to_email} via SendGrid API")
+            raise Exception(f"ZeptoMail API error {resp.status_code}: {resp.text}")
+    logging.info(f"Email '{subject}' sent to {to_email} via ZeptoMail")
     return True
 
 
@@ -1042,6 +1055,147 @@ async def send_slack_notification(webhook_url: str, title: str, items: list) -> 
         logging.error(f"Slack notification failed: {e}")
         return False
 
+# ── Expiry tracking: warranties, licences, AMC contracts ────────────────────
+EXPIRY_THRESHOLDS = (60, 30, 7)
+EXPIRY_LABELS = {"warranty": "Warranty", "license": "Licence", "amc": "AMC"}
+
+def _to_date(value):
+    """Parse the date strings stored on assets/licences/contracts (ISO datetime or YYYY-MM-DD)."""
+    if not value:
+        return None
+    text = str(value).strip()
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return datetime.strptime(text[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+def _expiry_severity(days_left: int) -> str:
+    if days_left < 0:
+        return "expired"
+    if days_left <= 7:
+        return "critical"
+    if days_left <= 30:
+        return "warning"
+    return "notice"
+
+async def _collect_expiring(tenant_id: Optional[str], days: int = 60, past_days: int = 30) -> list:
+    """Warranties, licences and AMC contracts expiring within `days` (or expired within `past_days`), soonest first."""
+    today = datetime.now(timezone.utc).date()
+    tq = {"tenant_id": tenant_id} if tenant_id else {}
+    items: list = []
+
+    def add(kind, ref_id, title, subtitle, raw_date, tenant, link):
+        d = _to_date(raw_date)
+        if not d:
+            return
+        left = (d - today).days
+        if -past_days <= left <= days:
+            items.append({"kind": kind, "id": ref_id, "title": title, "subtitle": subtitle,
+                          "expires_on": d.isoformat(), "days_left": left,
+                          "severity": _expiry_severity(left), "link": link, "tenant_id": tenant})
+
+    assets = await db.assets.find({**tq, "is_deleted": {"$ne": True}, "warranty_end_date": {"$nin": [None, ""]}},
+                                  {"_id": 0, "id": 1, "asset_tag": 1, "product_id": 1, "warranty_end_date": 1,
+                                   "warranty_provider": 1, "tenant_id": 1}).to_list(5000)
+    pnames = {p["id"]: p.get("name", "") async for p in db.products.find(
+        {"id": {"$in": list({a.get("product_id") for a in assets})}}, {"_id": 0, "id": 1, "name": 1})}
+    for a in assets:
+        add("warranty", a["id"], f"{a.get('asset_tag', '')} - {pnames.get(a.get('product_id'), 'Asset')}",
+            a.get("warranty_provider") or "Warranty", a["warranty_end_date"], a.get("tenant_id"), f"/assets/{a['id']}")
+
+    async for lic in db.licenses.find({**tq, "expiry_date": {"$nin": [None, ""]}}, {"_id": 0}):
+        add("license", lic["id"], lic.get("name", "Licence"), lic.get("vendor") or "Software licence",
+            lic["expiry_date"], lic.get("tenant_id"), "/licenses")
+
+    contracts = await db.amc_contracts.find({**tq, "status": {"$nin": ["cancelled", "terminated"]}}, {"_id": 0}).to_list(5000)
+    tags = {a["id"]: a.get("asset_tag", "") async for a in db.assets.find(
+        {"id": {"$in": list({c["asset_id"] for c in contracts})}}, {"_id": 0, "id": 1, "asset_tag": 1})}
+    for c in contracts:
+        add("amc", c["id"], f"AMC - {c.get('vendor_name', '')}", f"Asset {tags.get(c['asset_id'], '')}".strip(),
+            c.get("end_date"), c.get("tenant_id"), f"/assets/{c['asset_id']}")
+
+    items.sort(key=lambda i: i["days_left"])
+    return items
+
+def _summarize_expiring(items: list) -> dict:
+    live = [i for i in items if i["days_left"] >= 0]
+    return {
+        "warranty": sum(1 for i in live if i["kind"] == "warranty"),
+        "license": sum(1 for i in live if i["kind"] == "license"),
+        "amc": sum(1 for i in live if i["kind"] == "amc"),
+        "expired": sum(1 for i in items if i["days_left"] < 0),
+        "within_7": sum(1 for i in live if i["days_left"] <= 7),
+        "within_30": sum(1 for i in live if i["days_left"] <= 30),
+        "within_60": len(live),
+    }
+
+async def _over_used_licenses(tenant_id: Optional[str]) -> list:
+    tq = {"tenant_id": tenant_id} if tenant_id else {}
+    out = []
+    async for lic in db.licenses.find(tq, {"_id": 0, "id": 1, "name": 1, "seats_total": 1, "seats_used": 1}):
+        over = (lic.get("seats_used") or 0) - (lic.get("seats_total") or 0)
+        if over > 0:
+            out.append({**lic, "seats_over": over})
+    return out
+
+async def _send_expiry_alerts(tenant_admins: dict, tenant_slack: dict):
+    """Email/Slack each tenant once per item when it first crosses 60 / 30 / 7 days, and once when it expires."""
+    for tid in [t for t in tenant_admins if t != "__super__"]:
+        items = await _collect_expiring(tid, max(EXPIRY_THRESHOLDS), past_days=7)
+        fresh, keys = [], []
+        for it in items:
+            left = it["days_left"]
+            bucket = 0 if left < 0 else min(t for t in EXPIRY_THRESHOLDS if left <= t)
+            key = f"{it['kind']}:{it['id']}:{it['expires_on']}:{bucket}"
+            if await db.expiry_alerts_sent.find_one({"key": key}, {"_id": 1}):
+                continue
+            when = f"expired {-left} day(s) ago" if left < 0 else f"expires in {left} day(s)"
+            fresh.append(f"{EXPIRY_LABELS[it['kind']]}: {it['title']} - {when} ({it['expires_on']})")
+            keys.append(key)
+        if not fresh:
+            continue
+        for admin in tenant_admins.get(tid, []):
+            await send_alert_email(admin["email"], f"{len(fresh)} warranty / licence / AMC item(s) need attention", fresh,
+                                   intro="These items are expiring soon or have just expired:")
+        if tenant_slack.get(tid):
+            await send_slack_notification(tenant_slack[tid], f"{len(fresh)} warranty / licence / AMC item(s) need attention", fresh)
+        await db.expiry_alerts_sent.insert_many([{"key": k, "tenant_id": tid, "sent_at": datetime.now(timezone.utc).isoformat()} for k in keys])
+
+async def _tenant_summary_lines(tenant_id: Optional[str]) -> list:
+    """Plain-text lines for the weekly summary email (also used by 'send me this summary')."""
+    tq = {"tenant_id": tenant_id} if tenant_id else {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    summary = _summarize_expiring(await _collect_expiring(tenant_id, 30, past_days=0))
+    return [
+        f"Total assets: {await db.assets.count_documents({**tq, 'is_deleted': {'$ne': True}})}",
+        f"Open / In-progress tickets: {await db.tickets.count_documents({**tq, 'status': {'$in': ['open', 'in_progress']}})}",
+        f"Tickets past their SLA: {await db.tickets.count_documents({**tq, 'status': {'$in': ['open', 'in_progress']}, 'sla_due_at': {'$lt': now_iso}})}",
+        f"Pending orders: {await db.orders.count_documents({**tq, 'status': {'$in': ['pending', 'approved']}})}",
+        f"Expiring in 30 days: {summary['warranty']} warranties, {summary['license']} licences, {summary['amc']} AMC contracts",
+        f"Over-used licences: {len(await _over_used_licenses(tenant_id))}",
+    ]
+
+async def _already_done_today(name: str) -> bool:
+    """True if scheduled job `name` already ran today (guards against restarts re-sending)."""
+    token = datetime.now(timezone.utc).date().isoformat()
+    state = await db.scheduler_state.find_one({"name": name}, {"_id": 0})
+    if state and state.get("token") == token:
+        return True
+    await db.scheduler_state.update_one({"name": name}, {"$set": {"token": token}}, upsert=True)
+    return False
+
+async def _backfill_ticket_sla():
+    """Give still-open tickets that pre-date SLA tracking a deadline (adds a field only)."""
+    async for t in db.tickets.find({"status": {"$in": ["open", "in_progress"]}, "sla_due_at": {"$exists": False}},
+                                   {"_id": 0, "id": 1, "created_at": 1, "priority": 1}):
+        try:
+            await db.tickets.update_one({"id": t["id"]}, {"$set": {"sla_due_at": _sla_due(t["created_at"], str(t.get("priority", "medium")))}})
+        except Exception:
+            pass
+
 # ── Scheduled background alerts ─────────────────────────────────────────────
 async def run_scheduled_alerts():
     """Background task: runs every 24 hours, sends warranty & maintenance alerts."""
@@ -1069,31 +1223,8 @@ async def run_scheduled_alerts():
             tenants_list = await db.tenants.find({}, {"_id": 0, "id": 1, "settings": 1}).to_list(200)
             tenant_slack: dict = {t["id"]: t.get("settings", {}).get("slack_webhook_url", "") for t in tenants_list}
 
-            # ── Warranty expiry alerts ──────────────────────────────────────
-            expiring = await db.assets.find(
-                {"warranty_end_date": {"$gte": today, "$lte": soon_30}, "is_deleted": {"$ne": True}},
-                {"_id": 0, "asset_tag": 1, "name": 1, "warranty_end_date": 1, "tenant_id": 1}
-            ).to_list(500)
-
-            warranty_by_tenant: dict = {}
-            for a in expiring:
-                tid = a.get("tenant_id") or "__super__"
-                warranty_by_tenant.setdefault(tid, []).append(
-                    f"{a.get('asset_tag','?')} — {a.get('name','?')} (expires {a.get('warranty_end_date','?')[:10]})"
-                )
-
-            for tid, items in warranty_by_tenant.items():
-                recipients = tenant_admins.get(tid, tenant_admins.get("__super__", []))
-                for admin in recipients:
-                    await send_alert_email(
-                        admin["email"],
-                        f"⚠️ {len(items)} Asset(s) Warranty Expiring Soon",
-                        items,
-                        intro="The following assets have warranties expiring within 30 days:"
-                    )
-                webhook = tenant_slack.get(tid, "")
-                if webhook:
-                    await send_slack_notification(webhook, f"⚠️ {len(items)} warranties expiring soon", items)
+            # ── Warranty / licence / AMC expiry alerts (once per 60/30/7-day threshold) ──
+            await _send_expiry_alerts(tenant_admins, tenant_slack)
 
             # ── Overdue maintenance alerts ──────────────────────────────────
             # Mark overdue tasks in DB so UI shows correct badge
@@ -1127,18 +1258,11 @@ async def run_scheduled_alerts():
                     await send_slack_notification(webhook, f"🔧 {len(items)} overdue maintenance tasks", items)
 
             # ── Weekly summary report (every Monday) ───────────────────────
-            if now.weekday() == 0:  # Monday
+            if now.weekday() == 0 and not await _already_done_today("weekly_summary"):  # Monday
                 all_tenants = await db.tenants.find({"status": {"$ne": "inactive"}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
                 for tenant in all_tenants:
                     tid = tenant["id"]
-                    t_assets = await db.assets.count_documents({"tenant_id": tid, "is_deleted": {"$ne": True}})
-                    t_open_tickets = await db.tickets.count_documents({"tenant_id": tid, "status": {"$in": ["open", "in_progress"]}})
-                    t_pending_orders = await db.orders.count_documents({"tenant_id": tid, "status": {"$in": ["pending", "approved"]}})
-                    summary_lines = [
-                        f"Total assets: {t_assets}",
-                        f"Open / In-progress tickets: {t_open_tickets}",
-                        f"Pending orders: {t_pending_orders}",
-                    ]
+                    summary_lines = await _tenant_summary_lines(tid)
                     recipients = tenant_admins.get(tid, [])
                     for admin in recipients:
                         await send_alert_email(
@@ -1573,13 +1697,13 @@ async def get_me_oauth(request: Request, current_user: User = Depends(get_curren
 
 @api_router.post("/auth/test-email")
 async def test_email(current_user: User = Depends(get_current_user)):
-    """Send a test email to the logged-in user to verify SendGrid SMTP is working. Admin only."""
+    """Send a test email to the logged-in user to verify ZeptoMail is working. Admin only."""
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    if not SENDGRID_API_KEY or not FROM_EMAIL:
+    if not ZEPTOMAIL_TOKEN or not FROM_EMAIL:
         raise HTTPException(
             status_code=400,
-            detail="SendGrid not configured. Add SENDGRID_API_KEY and FROM_EMAIL to Railway environment variables."
+            detail="ZeptoMail not configured. Add ZEPTOMAIL_TOKEN, ZEPTOMAIL_API_URL and FROM_EMAIL to the server environment variables."
         )
     html_body = f"""
     <html>
@@ -2765,12 +2889,24 @@ async def create_ticket(ticket_data: TicketCreate, current_user: User = Depends(
     ticket_count = await db.tickets.count_documents({"tenant_id": current_user.tenant_id or "default"})
     ticket_number = f"TKT-{ticket_count + 1:05d}"
     
+    tenant_id = current_user.tenant_id or "default"
+    fields = ticket_data.model_dump()
+    asset_tag = ""
+    if fields.get("asset_id"):
+        asset = await db.assets.find_one({"id": fields["asset_id"], "is_deleted": {"$ne": True}}, {"_id": 0, "tenant_id": 1, "asset_tag": 1})
+        if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
+            raise HTTPException(status_code=404, detail="Asset not found")
+        asset_tag = asset.get("asset_tag", "")
+
     ticket = Ticket(
-        **ticket_data.model_dump(),
+        **fields,
+        asset_tag=asset_tag,
         ticket_number=ticket_number,
-        tenant_id=current_user.tenant_id or "default",
-        created_by=current_user.id
+        tenant_id=tenant_id,
+        created_by=current_user.id,
+        assigned_to=await _pick_helpdesk_agent(tenant_id),
     )
+    ticket.sla_due_at = _sla_due(ticket.created_at, ticket.priority.value)
     await db.tickets.insert_one(ticket.model_dump())
     return ticket
 
@@ -2806,15 +2942,91 @@ async def update_ticket(ticket_id: str, ticket_update: TicketUpdate, current_use
         raise HTTPException(status_code=403, detail="Access denied")
     
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
+    if not ticket or (current_user.role != UserRole.SUPER_ADMIN and ticket.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Ticket not found")
-    
+
     update_data = ticket_update.model_dump(exclude_unset=True)
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    await db.tickets.update_one({"id": ticket_id}, {"$set": update_data})
+    now_iso = datetime.now(timezone.utc).isoformat()
+    update_data["updated_at"] = now_iso
+    unset: dict = {}
+    if "priority" in update_data:
+        update_data["sla_due_at"] = _sla_due(ticket["created_at"], update_data["priority"].value)
+    if "status" in update_data:
+        if update_data["status"] in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+            update_data["resolved_at"] = ticket.get("resolved_at") or now_iso
+        else:
+            unset["resolved_at"] = ""
+
+    ops: dict = {"$set": update_data}
+    if unset:
+        ops["$unset"] = unset
+    await db.tickets.update_one({"id": ticket_id}, ops)
     updated_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     return Ticket(**updated_ticket)
+
+# -- Helpdesk helpers: SLA, auto-assign, canned replies -----------------------
+SLA_HOURS = {"critical": 4, "high": 8, "medium": 24, "low": 72}
+
+def _sla_due(created_iso: str, priority: str) -> str:
+    """Deadline for a ticket, from its creation time and priority."""
+    created = datetime.fromisoformat(created_iso)
+    return (created + timedelta(hours=SLA_HOURS.get(priority, 24))).isoformat()
+
+async def _pick_helpdesk_agent(tenant_id: str) -> Optional[str]:
+    """Least-loaded active helpdesk agent of the tenant (open + in-progress tickets); None if there is none."""
+    agents = await db.users.find({"tenant_id": tenant_id, "role": "helpdesk_agent", "status": {"$ne": "inactive"}},
+                                 {"_id": 0, "id": 1}).to_list(200)
+    if not agents:
+        return None
+    loads = []
+    for a in agents:
+        n = await db.tickets.count_documents({"tenant_id": tenant_id, "assigned_to": a["id"], "status": {"$in": ["open", "in_progress"]}})
+        loads.append((n, a["id"]))
+    return min(loads)[1]
+
+DEFAULT_CANNED_REPLIES = [
+    ("Acknowledged", "Hi, thanks for reaching out. We have received your request and are looking into it."),
+    ("Need more details", "Could you share more details (what you were doing, any error message, and a screenshot if possible) so we can investigate?"),
+    ("Restart and retry", "Please restart your device and try again. If the issue continues, reply here and we will take a closer look."),
+    ("Replacement arranged", "We are arranging a replacement for the affected device. We will update you with the pickup/delivery details shortly."),
+    ("Resolved", "This issue has been resolved. Please reply if you face it again and we will reopen the ticket."),
+]
+
+class CannedReplyBody(BaseModel):
+    title: str = Field(..., min_length=1, max_length=100)
+    content: str = Field(..., min_length=1, max_length=2000)
+
+_HELPDESK_ROLES = [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]
+
+@api_router.get("/canned-replies")
+async def list_canned_replies(current_user: User = Depends(get_current_user)):
+    if current_user.role not in _HELPDESK_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tid = current_user.tenant_id or "default"
+    replies = await db.canned_replies.find({"tenant_id": tid}, {"_id": 0, "seeded": 0}).sort("title", 1).to_list(200)
+    if not replies and not await db.canned_replies.find_one({"tenant_id": tid, "seeded": True}, {"_id": 1}):
+        # First visit: give the tenant a starter set (they can delete or add their own)
+        docs = [{"id": str(uuid.uuid4()), "tenant_id": tid, "title": t, "content": c, "seeded": True} for t, c in DEFAULT_CANNED_REPLIES]
+        await db.canned_replies.insert_many([dict(d) for d in docs])
+        replies = sorted(({k: v for k, v in d.items() if k != "seeded"} for d in docs), key=lambda r: r["title"])
+    return replies
+
+@api_router.post("/canned-replies")
+async def create_canned_reply(body: CannedReplyBody, current_user: User = Depends(get_current_user)):
+    if current_user.role not in _HELPDESK_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    doc = {"id": str(uuid.uuid4()), "tenant_id": current_user.tenant_id or "default", "title": body.title.strip(), "content": body.content.strip()}
+    await db.canned_replies.insert_one(dict(doc))
+    return doc
+
+@api_router.delete("/canned-replies/{reply_id}")
+async def delete_canned_reply(reply_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role not in _HELPDESK_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    res = await db.canned_replies.delete_one({"id": reply_id, "tenant_id": current_user.tenant_id or "default"})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Reply not found")
+    return {"message": "Reply deleted"}
 
 # Dashboard stats
 @api_router.get("/dashboard/stats")
@@ -4485,6 +4697,10 @@ async def create_license(lic: LicenseCreate, current_user: User = Depends(get_cu
 async def list_licenses(current_user: User = Depends(get_current_user_hybrid)):
     query = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
     licenses = await db.licenses.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    for lic in licenses:
+        over = (lic.get("seats_used") or 0) - (lic.get("seats_total") or 0)
+        lic["over_used"] = over > 0
+        lic["seats_over"] = max(over, 0)
     return licenses
 
 @api_router.put("/licenses/{license_id}")
@@ -4964,6 +5180,37 @@ async def get_dashboard_charts(current_user: User = Depends(get_current_user_hyb
 # ADVANCED REPORTS
 # ═══════════════════════════════════════════════════════════════════════════
 
+@api_router.get("/expiring")
+async def get_expiring(days: int = Query(60, ge=1, le=365), current_user: User = Depends(get_current_user)):
+    """Everything expiring soon (warranty / licence / AMC) plus over-used licences, for the Expiring Soon page."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tid = None if current_user.role == UserRole.SUPER_ADMIN else current_user.tenant_id
+    items = await _collect_expiring(tid, days)
+    return {"items": items, "summary": _summarize_expiring(items), "over_used_licenses": await _over_used_licenses(tid)}
+
+@api_router.get("/dashboard/attention")
+async def get_dashboard_attention(current_user: User = Depends(get_current_user)):
+    """Small 'needs attention' payload for the dashboard: expiries, over-used licences, SLA-breached tickets."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tid = None if current_user.role == UserRole.SUPER_ADMIN else current_user.tenant_id
+    tq = {"tenant_id": tid} if tid else {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    soon_iso = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+    open_q = {**tq, "status": {"$in": ["open", "in_progress"]}}
+    result = {
+        "sla_breached": await db.tickets.count_documents({**open_q, "sla_due_at": {"$lt": now_iso}}),
+        "sla_due_soon": await db.tickets.count_documents({**open_q, "sla_due_at": {"$gte": now_iso, "$lte": soon_iso}}),
+        "expiring_30": 0, "expired": 0, "over_used_licenses": 0, "top": [],
+    }
+    if current_user.role != UserRole.HELPDESK_AGENT:
+        items = await _collect_expiring(tid, 30)
+        summary = _summarize_expiring(items)
+        result.update({"expiring_30": summary["within_30"], "expired": summary["expired"],
+                       "over_used_licenses": len(await _over_used_licenses(tid)), "top": items[:5]})
+    return result
+
 @api_router.get("/reports/assets-by-department")
 async def report_assets_by_department(current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
@@ -4972,16 +5219,56 @@ async def report_assets_by_department(current_user: User = Depends(get_current_u
     departments = await db.departments.find(tenant_q, {"_id": 0}).to_list(200)
     result = []
     for dept in departments:
-        count = await db.assets.count_documents({"department_id": dept["id"], "is_deleted": {"$ne": True}})
-        total_value = 0.0
-        assets = await db.assets.find({"department_id": dept["id"], "is_deleted": {"$ne": True}}, {"purchase_price": 1}).to_list(10000)
-        total_value = sum(a.get("purchase_price", 0) for a in assets)
-        result.append({"department": dept["name"], "asset_count": count, "total_value": total_value})
+        assets = await db.assets.find({"department_id": dept["id"], "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(10000)
+        count = len(assets)
+        total_value = sum(a.get("purchase_price") or 0 for a in assets)
+        now = datetime.now(timezone.utc)
+        current_value = sum(_depreciated_value(a, now) for a in assets)
+        amc_cost = 0.0
+        if assets:
+            async for c in db.amc_contracts.find({"asset_id": {"$in": [a["id"] for a in assets]}, "status": {"$nin": ["cancelled", "terminated"]}},
+                                                 {"_id": 0, "annual_cost": 1}):
+                amc_cost += c.get("annual_cost") or 0
+        result.append({"department": dept["name"], "asset_count": count, "total_value": total_value,
+                       "current_value": round(current_value, 2), "depreciation": round(total_value - current_value, 2),
+                       "amc_annual_cost": round(amc_cost, 2)})
     # Add unassigned
     no_dept = await db.assets.count_documents({**tenant_q, "department_id": None, "is_deleted": {"$ne": True}})
     if no_dept > 0:
-        result.append({"department": "No Department", "asset_count": no_dept, "total_value": 0})
+        result.append({"department": "No Department", "asset_count": no_dept, "total_value": 0,
+                       "current_value": 0, "depreciation": 0, "amc_annual_cost": 0})
     return result
+
+def _depreciated_value(a: dict, now: datetime) -> float:
+    """Current book value of an asset using its own depreciation settings (same rules as the depreciation report)."""
+    raw = a.get("purchase_date") or a.get("created_at")
+    try:
+        bought = datetime.fromisoformat(str(raw).replace("Z", "+00:00")) if raw else now
+        if bought.tzinfo is None:
+            bought = bought.replace(tzinfo=timezone.utc)
+    except Exception:
+        bought = now
+    years = max((now - bought).days / 365.25, 0)
+    price = a.get("purchase_price") or 0
+    rate = (a.get("depreciation_rate") or 20) / 100
+    salvage = a.get("salvage_value") or 0
+    method = a.get("depreciation_method") or "straight_line"
+    if method == "straight_line":
+        return max(salvage, price - (price - salvage) * rate * years)
+    if method == "declining_balance":
+        return max(salvage, price * ((1 - rate) ** years))
+    return price
+
+@api_router.post("/reports/summary/send-me")
+async def send_summary_to_me(current_user: User = Depends(get_current_user_hybrid)):
+    """Email the weekly-style summary to the current user right now."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tid = None if current_user.role == UserRole.SUPER_ADMIN else current_user.tenant_id
+    lines = await _tenant_summary_lines(tid)
+    sent = await send_alert_email(current_user.email, "Asset Management summary", lines,
+                                  intro=f"Summary as of {datetime.now(timezone.utc).strftime('%Y-%m-%d')}:")
+    return {"sent": bool(sent), "lines": lines}
 
 @api_router.get("/reports/maintenance-costs")
 async def report_maintenance_costs(current_user: User = Depends(get_current_user_hybrid)):
@@ -5929,6 +6216,18 @@ async def list_invites(current_user: User = Depends(get_current_user)):
 
 
 # Include router
+@api_router.get("/assets/{asset_id}", response_model=Asset)
+async def get_asset(asset_id: str, current_user: User = Depends(get_current_user)):
+    """One asset, with the same visibility rules as the asset list."""
+    asset = await db.assets.find_one({"id": asset_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if current_user.role == UserRole.EMPLOYEE and asset.get("assigned_to") != current_user.id and asset.get("status") != "available":
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return Asset(**asset)
+
 app.include_router(api_router)
 
 @app.middleware("http")
@@ -6029,6 +6328,9 @@ async def startup_db_client():
     await db.product_categories.create_index("key", unique=True, background=True)
     await seed_product_categories()
     await db.product_backup_items.create_index("snapshot_id", background=True)
+    await db.expiry_alerts_sent.create_index("key", unique=True, background=True)
+    await db.canned_replies.create_index("tenant_id", background=True)
+    await _backfill_ticket_sla()
     asyncio.create_task(run_nightly_product_backup())
     # Patch prices onto existing tiers that pre-date the price_monthly field
     tier_prices = {"tier-free": 0.0, "tier-pro": 999.0, "tier-enterprise": 2999.0}

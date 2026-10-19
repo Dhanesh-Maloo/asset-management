@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -31,6 +32,9 @@ const Tickets = () => {
   const [ticketToDelete, setTicketToDelete] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [linkedAsset, setLinkedAsset] = useState(null); // { id, tag } when the ticket is raised from an asset page
+  const [cannedReplies, setCannedReplies] = useState([]);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -47,6 +51,19 @@ const Tickets = () => {
   useEffect(() => {
     fetchTickets();
     fetchUsers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Opened from an asset page ("Report Issue"): link that asset and open the form
+  useEffect(() => {
+    const assetId = searchParams.get('asset');
+    if (!assetId) return;
+    axios.get(`${API}/assets/${assetId}`).then((res) => {
+      setLinkedAsset({ id: res.data.id, tag: res.data.asset_tag });
+      setFormData({ title: `Issue with ${res.data.asset_tag}`, description: '', priority: 'medium', category: 'hardware' });
+      setCreateDialogOpen(true);
+    }).catch(() => toast.error('Could not load that asset'));
+    setSearchParams({}, { replace: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -87,9 +104,10 @@ const Tickets = () => {
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API}/tickets`, formData);
+      await axios.post(`${API}/tickets`, linkedAsset ? { ...formData, asset_id: linkedAsset.id } : formData);
       toast.success('Ticket created successfully');
       setCreateDialogOpen(false);
+      setLinkedAsset(null);
       setFormData({ title: '', description: '', priority: 'medium', category: 'general' });
       fetchTickets();
     } catch (error) {
@@ -157,6 +175,23 @@ const Tickets = () => {
     return <Badge className={config[status]}>{status.replace('_', ' ').toUpperCase()}</Badge>;
   };
 
+  // SLA: time left for open tickets, met/missed for finished ones
+  const renderSla = (ticket) => {
+    if (!ticket.sla_due_at) return <span className="text-muted-foreground">-</span>;
+    const due = new Date(ticket.sla_due_at).getTime();
+    if (['resolved', 'closed'].includes(ticket.status)) {
+      const done = ticket.resolved_at ? new Date(ticket.resolved_at).getTime() : Date.now();
+      return done <= due
+        ? <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20">Met</Badge>
+        : <Badge className="bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20">Missed</Badge>;
+    }
+    const mins = Math.round((due - Date.now()) / 60000);
+    const fmt = (m) => { const a = Math.abs(m); return a >= 1440 ? `${Math.floor(a / 1440)}d ${Math.floor((a % 1440) / 60)}h` : a >= 60 ? `${Math.floor(a / 60)}h ${a % 60}m` : `${a}m`; };
+    if (mins < 0) return <Badge className="bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20" data-testid="sla-breached">Breached {fmt(mins)} ago</Badge>;
+    if (mins < 120) return <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20">Due in {fmt(mins)}</Badge>;
+    return <span className="text-sm text-muted-foreground">Due in {fmt(mins)}</span>;
+  };
+
   const canManage = ['super_admin', 'tenant_admin', 'asset_manager', 'helpdesk_agent'].includes(user?.role);
 
   const toggleSelect = (id) => setSelectedIds(prev =>
@@ -177,6 +212,9 @@ const Tickets = () => {
   const openComments = async (ticket) => {
     setCommentTicket(ticket);
     setCommentsLoading(true);
+    if (canManage) {
+      axios.get(`${API}/canned-replies`).then((r) => setCannedReplies(r.data)).catch(() => {});
+    }
     try {
       const res = await axios.get(`${API}/tickets/${ticket.id}/comments`);
       setComments(res.data);
@@ -195,6 +233,26 @@ const Tickets = () => {
       setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } catch (e) { toast.error(e.response?.data?.detail || 'Failed to send comment'); }
     finally { setCommentSending(false); }
+  };
+
+  const saveCannedReply = async () => {
+    const content = newComment.trim();
+    if (!content) { toast.error('Type the reply text first, then save it'); return; }
+    const title = window.prompt('Name for this saved reply:');
+    if (!title || !title.trim()) return;
+    try {
+      const res = await axios.post(`${API}/canned-replies`, { title: title.trim(), content });
+      setCannedReplies((prev) => [...prev, res.data]);
+      toast.success('Reply saved');
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save reply'); }
+  };
+
+  const deleteCannedReply = async (reply) => {
+    if (!window.confirm(`Delete saved reply "${reply.title}"?`)) return;
+    try {
+      await axios.delete(`${API}/canned-replies/${reply.id}`);
+      setCannedReplies((prev) => prev.filter((r) => r.id !== reply.id));
+    } catch { toast.error('Failed to delete reply'); }
   };
 
   const deleteComment = async (commentId) => {
@@ -216,7 +274,7 @@ const Tickets = () => {
               Submit and track IT support requests
             </p>
           </div>
-          <Button onClick={() => setCreateDialogOpen(true)} data-testid="create-ticket-btn">
+          <Button onClick={() => { setLinkedAsset(null); setFormData({ title: '', description: '', priority: 'medium', category: 'general' }); setCreateDialogOpen(true); }} data-testid="create-ticket-btn">
             <Plus className="h-4 w-4 mr-2" />
             New Ticket
           </Button>
@@ -287,6 +345,8 @@ const Tickets = () => {
                       <TableHead>Priority</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Category</TableHead>
+                      <TableHead>Asset</TableHead>
+                      <TableHead>SLA</TableHead>
                       {canManage && <TableHead>Assigned To</TableHead>}
                       {canManage && <TableHead>Created By</TableHead>}
                       <TableHead>Date</TableHead>
@@ -316,6 +376,8 @@ const Tickets = () => {
                         <TableCell>{getPriorityBadge(ticket.priority)}</TableCell>
                         <TableCell>{getStatusBadge(ticket.status)}</TableCell>
                         <TableCell className="capitalize">{ticket.category}</TableCell>
+                        <TableCell className="font-mono text-xs">{ticket.asset_tag || <span className="text-muted-foreground">-</span>}</TableCell>
+                        <TableCell>{renderSla(ticket)}</TableCell>
                         {canManage && (
                           <TableCell>
                             {ticket.assigned_to ? (
@@ -378,13 +440,18 @@ const Tickets = () => {
       </div>
 
       {/* Create Ticket Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+      <Dialog open={createDialogOpen} onOpenChange={(o) => { setCreateDialogOpen(o); if (!o) setLinkedAsset(null); }}>
         <DialogContent className="max-w-md" data-testid="create-ticket-dialog">
           <DialogHeader>
             <DialogTitle>Create New Ticket</DialogTitle>
             <DialogDescription>Submit a new IT support request</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
+            {linkedAsset && (
+              <p className="text-sm rounded-md bg-primary/10 text-primary px-3 py-2" data-testid="linked-asset-note">
+                Linked asset: <strong className="font-mono">{linkedAsset.tag}</strong>
+              </p>
+            )}
             <div>
               <Label htmlFor="title">Title</Label>
               <Input
@@ -575,6 +642,17 @@ const Tickets = () => {
               <div ref={commentsEndRef} />
             </div>
 
+            {canManage && (
+              <div className="px-4 pt-3 border-t flex flex-wrap gap-1.5 items-center" data-testid="canned-replies">
+                {cannedReplies.map((r) => (
+                  <span key={r.id} className="inline-flex items-center rounded-full border border-slate-300 text-xs text-slate-700">
+                    <button type="button" className="pl-2.5 pr-1 py-0.5 hover:text-primary" title={r.content} onClick={() => setNewComment(r.content)}>{r.title}</button>
+                    <button type="button" className="pr-2 py-0.5 text-slate-400 hover:text-red-500" aria-label={`Delete ${r.title}`} onClick={() => deleteCannedReply(r)}>&times;</button>
+                  </span>
+                ))}
+                <button type="button" onClick={saveCannedReply} className="text-xs text-primary hover:underline">+ Save text as reply</button>
+              </div>
+            )}
             <form onSubmit={sendComment} className="p-4 border-t flex gap-3">
               <input
                 value={newComment}

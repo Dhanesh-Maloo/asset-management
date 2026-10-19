@@ -21,7 +21,9 @@ import {
   Settings,
   ArrowRight,
   Sparkles,
-  Activity
+  Activity,
+  AlertTriangle,
+  CalendarClock
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -164,6 +166,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState({});
   const [charts, setCharts] = useState(null);
+  const [attention, setAttention] = useState(null);
   const [loading, setLoading] = useState(true);
   const [demoStatus, setDemoStatus] = useState(null);
   const [clearingDemo, setClearingDemo] = useState(false);
@@ -184,9 +187,20 @@ const Dashboard = () => {
   useEffect(() => {
     fetchStats();
     fetchCharts();
+    fetchAttention();
     fetchDemoStatus();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const fetchAttention = async () => {
+    if (user?.role === 'employee') return;
+    try {
+      const res = await axios.get(`${API}/dashboard/attention`);
+      setAttention(res.data);
+    } catch {
+      // silently fail
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -325,6 +339,48 @@ const Dashboard = () => {
         {/* Two-column layout: main content + activity feed */}
         <div className={`grid grid-cols-1 gap-6 items-start ${canSeeActivity ? 'xl:grid-cols-[minmax(0,1fr)_340px]' : ''}`}>
         <div className="min-w-0">
+
+        {/* Needs attention: SLA, expiries, licence over-use */}
+        {attention && (attention.sla_breached > 0 || attention.expiring_30 > 0 || attention.expired > 0 || attention.over_used_licenses > 0) && (
+          <Card className="mb-6 border-amber-500/30 shadow-card" data-testid="needs-attention-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                Needs Attention
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { label: 'Tickets past SLA', value: attention.sla_breached, link: '/tickets', bad: true },
+                  { label: 'Expiring in 30 days', value: attention.expiring_30, link: '/expiring', bad: false },
+                  { label: 'Already expired', value: attention.expired, link: '/expiring', bad: true },
+                  { label: 'Over-used licenses', value: attention.over_used_licenses, link: '/licenses', bad: true },
+                ].filter(t => user?.role !== 'helpdesk_agent' || t.link === '/tickets').map(t => (
+                  <button key={t.label} onClick={() => navigate(t.link)}
+                    className="text-left rounded-lg border border-border px-3 py-2.5 hover:bg-muted/50 transition-colors">
+                    <div className={`text-2xl font-bold ${t.value > 0 ? (t.bad ? 'text-red-600' : 'text-amber-600') : 'text-muted-foreground'}`}>{t.value}</div>
+                    <div className="text-xs text-muted-foreground">{t.label}</div>
+                  </button>
+                ))}
+              </div>
+              {attention.top?.length > 0 && (
+                <div className="mt-4 space-y-1.5">
+                  {attention.top.map(item => (
+                    <button key={`${item.kind}-${item.id}`} onClick={() => navigate(item.link)}
+                      className="w-full flex items-center gap-3 text-left text-sm rounded-md px-2 py-1.5 hover:bg-muted/50">
+                      <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="flex-1 truncate">{item.title}</span>
+                      <span className={`text-xs font-medium ${item.days_left < 0 ? 'text-red-600' : item.days_left <= 7 ? 'text-red-600' : 'text-amber-600'}`}>
+                        {item.days_left < 0 ? `expired ${-item.days_left}d ago` : `${item.days_left}d left`}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats Grid */}
         {loading ? (

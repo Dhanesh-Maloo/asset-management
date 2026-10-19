@@ -28,6 +28,7 @@ import Locations from './pages/Locations';
 import Licenses from './pages/Licenses';
 import Vendors from './pages/Vendors';
 import Reports from './pages/Reports';
+import ExpiringSoon from './pages/ExpiringSoon';
 import ActivityFeed from './pages/ActivityFeed';
 import Reservations from './pages/Reservations';
 import InviteAccept from './pages/InviteAccept';
@@ -193,6 +194,15 @@ function AppRouter() {
               element={
                 <ProtectedRoute allowedRoles={['super_admin']}>
                   <TierManagement />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/expiring"
+              element={
+                <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager']}>
+                  <ExpiringSoon />
                 </ProtectedRoute>
               }
             />

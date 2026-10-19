@@ -132,6 +132,7 @@ const Licenses = () => {
     total: licenses.length,
     expiringSoon: licenses.filter(l => isExpiringSoon(l.expiry_date)).length,
     expired: licenses.filter(l => isExpired(l.expiry_date)).length,
+    overUsed: licenses.filter(l => l.over_used).length,
     totalSeats: licenses.reduce((s, l) => s + (l.seats_total || 0), 0),
     usedSeats: licenses.reduce((s, l) => s + (l.seats_used || 0), 0),
   };
@@ -158,6 +159,13 @@ const Licenses = () => {
             </div>
           )}
         </div>
+
+        {stats.overUsed > 0 && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400" data-testid="license-overuse-banner">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {stats.overUsed} license{stats.overUsed === 1 ? ' is' : 's are'} using more seats than purchased. Buy more seats or free some up to stay compliant.
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
@@ -220,7 +228,12 @@ const Licenses = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="text-xs">{lic.seats_used}/{lic.seats_total}</div>
+                          <div className={`text-xs ${lic.over_used ? 'font-semibold text-red-600' : ''}`}>{lic.seats_used}/{lic.seats_total}</div>
+                          {lic.over_used && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-700 dark:text-red-400" data-testid="license-over-badge">
+                              +{lic.seats_over} over
+                            </span>
+                          )}
                           <div className="flex-1 max-w-16 bg-muted rounded-full h-1.5">
                             <div className="bg-primary rounded-full h-1.5" style={{ width: `${Math.min(100, (lic.seats_used / lic.seats_total) * 100)}%` }}></div>
                           </div>

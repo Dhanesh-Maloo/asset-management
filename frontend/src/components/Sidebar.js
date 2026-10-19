@@ -26,7 +26,8 @@ import {
   User,
   CalendarDays,
   Boxes,
-  QrCode
+  QrCode,
+  CalendarClock
 } from 'lucide-react';
 
 const ALL_ROLES = ['super_admin', 'tenant_admin', 'asset_manager', 'helpdesk_agent', 'employee'];
@@ -37,7 +38,6 @@ export const NAV_GROUPS = [
     label: null, // top-level, no heading
     items: [
       { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ALL_ROLES, feature: null },
-      { name: 'My Profile', href: '/profile', icon: User, roles: ALL_ROLES, feature: null },
     ],
   },
   {
@@ -64,6 +64,7 @@ export const NAV_GROUPS = [
     label: 'Insights',
     items: [
       { name: 'Reports', href: '/reports', icon: FileBarChart, roles: MANAGE_ROLES, feature: null },
+      { name: 'Expiring Soon', href: '/expiring', icon: CalendarClock, roles: MANAGE_ROLES, feature: null },
       { name: 'Activity Feed', href: '/activity', icon: Activity, roles: MANAGE_ROLES, feature: null },
     ],
   },
@@ -77,6 +78,12 @@ export const NAV_GROUPS = [
       { name: 'Tier Management', href: '/tier-management', icon: Crown, roles: ['super_admin'], feature: null },
       { name: 'Subscription', href: '/subscription', icon: Gauge, roles: ['tenant_admin', 'asset_manager'], feature: null },
       { name: 'Settings', href: '/tenant-settings', icon: Settings, roles: ['super_admin', 'tenant_admin'], feature: null },
+    ],
+  },
+  {
+    label: null, // personal link, always last
+    items: [
+      { name: 'My Profile', href: '/profile', icon: User, roles: ALL_ROLES, feature: null },
     ],
   },
 ];
