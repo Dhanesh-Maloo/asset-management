@@ -68,6 +68,10 @@ const Assets = () => {
   // Department filter
   const [departmentFilter, setDepartmentFilter] = useState('');
 
+  // Product category filter (global category list)
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [categoryOptions, setCategoryOptions] = useState([]);
+
   // Import state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState(null);
@@ -78,7 +82,7 @@ const Assets = () => {
     fetchData();
     fetchDepartments();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, statusFilter, demoFilter, departmentFilter]);
+  }, [searchTerm, statusFilter, demoFilter, departmentFilter, categoryFilter]);
 
   const fetchData = async () => {
     try {
@@ -88,6 +92,7 @@ const Assets = () => {
       if (demoFilter === 'demo') params.is_demo = true;
       if (demoFilter === 'regular') params.is_demo = false;
       if (departmentFilter) params.department_id = departmentFilter;
+      if (categoryFilter) params.category = categoryFilter;
       const [assetsRes, productsRes] = await Promise.all([
         axios.get(`${API}/assets`, { params }),
         axios.get(`${API}/products`)
@@ -207,6 +212,10 @@ const Assets = () => {
     try {
       const res = await cachedGet(axios, `${API}/departments`, {}, 120000);
       setDepartments(res.data);
+    } catch { /* silently fail */ }
+    try {
+      const res = await axios.get(`${API}/product-categories`);
+      setCategoryOptions(res.data);
     } catch { /* silently fail */ }
   };
 
@@ -606,9 +615,9 @@ const Assets = () => {
                     <Button variant="outline" size="sm" className="h-9 relative">
                       <Filter className="h-3.5 w-3.5 mr-1.5" />
                       More filters
-                      {(demoFilter || departmentFilter) && (
+                      {(demoFilter || departmentFilter || categoryFilter) && (
                         <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center">
-                          {[demoFilter, departmentFilter].filter(Boolean).length}
+                          {[demoFilter, departmentFilter, categoryFilter].filter(Boolean).length}
                         </span>
                       )}
                     </Button>
@@ -627,6 +636,22 @@ const Assets = () => {
                         </SelectContent>
                       </Select>
                     </div>
+                    {categoryOptions.length > 0 && (
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Category</Label>
+                        <Select value={categoryFilter || "all"} onValueChange={v => setCategoryFilter(v === "all" ? "" : v)}>
+                          <SelectTrigger className="h-9 mt-1" data-testid="asset-category-filter">
+                            <SelectValue placeholder="All Categories" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Categories</SelectItem>
+                            {categoryOptions.map(c => (
+                              <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     {departments.length > 0 && (
                       <div>
                         <Label className="text-xs text-muted-foreground">Department</Label>
@@ -643,12 +668,12 @@ const Assets = () => {
                         </Select>
                       </div>
                     )}
-                    {(demoFilter || departmentFilter) && (
+                    {(demoFilter || departmentFilter || categoryFilter) && (
                       <Button
                         variant="ghost"
                         size="sm"
                         className="w-full h-8 text-muted-foreground"
-                        onClick={() => { setDemoFilter(''); setDepartmentFilter(''); }}
+                        onClick={() => { setDemoFilter(''); setDepartmentFilter(''); setCategoryFilter(''); }}
                       >
                         Clear filters
                       </Button>
@@ -672,9 +697,9 @@ const Assets = () => {
                 </div>
                 <p className="text-sm font-medium mb-1">No assets found</p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  {searchTerm || statusFilter || departmentFilter ? 'Try adjusting your search or filters.' : 'Add your first asset to get started.'}
+                  {searchTerm || statusFilter || departmentFilter || categoryFilter ? 'Try adjusting your search or filters.' : 'Add your first asset to get started.'}
                 </p>
-                {canManage && !searchTerm && !statusFilter && !departmentFilter && (
+                {canManage && !searchTerm && !statusFilter && !departmentFilter && !categoryFilter && (
                   <Button size="sm" onClick={() => setAddAssetDialogOpen(true)}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Asset

@@ -408,6 +408,42 @@ const Dashboard = () => {
                 </Card>
               )}
 
+              {/* Assets by Category */}
+              {charts.assets_by_category?.length > 0 && (
+                <Card className="border-border shadow-card" data-testid="assets-by-category-chart">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold">Assets by Category</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={charts.assets_by_category} layout="vertical" margin={{ left: 8, right: 32, top: 4, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} allowDecimals={false} axisLine={false} tickLine={false} />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: 'hsl(var(--foreground))' }} width={100} axisLine={false} tickLine={false} />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length) return null;
+                            const row = payload[0].payload;
+                            return (
+                              <div className="bg-popover border border-border rounded-lg p-3 shadow-dropdown text-sm">
+                                <p className="font-semibold mb-1">{row.name}</p>
+                                <p>{row.value} asset{row.value === 1 ? '' : 's'}</p>
+                                {user?.role !== 'super_admin' && row.total_value > 0 && (
+                                  <p className="text-muted-foreground">Purchase value: {row.total_value.toLocaleString()}</p>
+                                )}
+                              </div>
+                            );
+                          }}
+                        />
+                        <Bar dataKey="value" fill="#4F46E5" radius={[0, 4, 4, 0]}>
+                          <LabelList dataKey="value" position="right" style={{ fill: '#64748b', fontSize: 11 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Ticket Status Donut */}
               {charts.ticket_status?.length > 0 && (
                 <Card className="border-border shadow-card">

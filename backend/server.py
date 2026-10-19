@@ -1925,6 +1925,11 @@ async def _get_or_create_category(name: str, user: User) -> str:
         raise
     return clean
 
+async def _labels_for_key(key: str) -> list:
+    """All category spellings stored on products (any tenant, incl. soft-deleted) that normalize to `key`."""
+    return list({p.get("category") async for p in db.products.find({}, {"_id": 0, "category": 1})
+                 if _category_key(p.get("category")) == key})
+
 async def seed_product_categories():
     """Backfill the global list from categories already used by products (insert-only, never edits products)."""
     counts: dict = {}
@@ -1948,6 +1953,14 @@ async def seed_product_categories():
 @api_router.get("/product-categories")
 async def list_product_categories(current_user: User = Depends(get_current_user)):
     cats = await db.product_categories.find({}, {"_id": 0, "id": 1, "name": 1, "key": 1}).sort("name", 1).to_list(1000)
+    if current_user.role == UserRole.SUPER_ADMIN:
+        # Super admin sees how many products (all tenants) sit in each category
+        counts: dict = {}
+        async for p in db.products.find({"is_deleted": {"$ne": True}}, {"_id": 0, "category": 1}):
+            k = _category_key(p.get("category"))
+            counts[k] = counts.get(k, 0) + 1
+        for c in cats:
+            c["product_count"] = counts.get(c["key"], 0)
     return cats
 
 @api_router.post("/product-categories")
@@ -1981,8 +1994,7 @@ async def rename_product_category(category_id: str, body: CategoryBody, current_
     if clash:
         raise HTTPException(status_code=409, detail=f"Category '{clash['name']}' already exists.")
     # Only the label changes; every product in this category (all tenants) is relabelled, none removed.
-    old_labels = {p.get("category") async for p in db.products.find({}, {"_id": 0, "category": 1})
-                  if _category_key(p.get("category")) == cat["key"]}
+    old_labels = await _labels_for_key(cat["key"])
     if old_labels:
         await db.products.update_many({"category": {"$in": list(old_labels)}}, {"$set": {"category": new_name}})
     await db.product_categories.update_one({"id": category_id}, {"$set": {"name": new_name, "key": new_key}})
@@ -2003,6 +2015,154 @@ async def delete_product_category(category_id: str, current_user: User = Depends
     await db.product_categories.delete_one({"id": category_id})
     await write_audit_log(current_user.id, "delete", "product_category", category_id, cat["name"], tenant_id=current_user.tenant_id)
     return {"message": "Category deleted"}
+
+class MergeBody(BaseModel):
+    target_id: str
+
+@api_router.post("/product-categories/{category_id}/merge")
+async def merge_product_categories(category_id: str, body: MergeBody, current_user: User = Depends(get_current_user)):
+    """Move every product (all tenants) from this category into the target, then remove this category."""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only the super admin can merge categories")
+    if body.target_id == category_id:
+        raise HTTPException(status_code=400, detail="Choose a different category to merge into")
+    source = await db.product_categories.find_one({"id": category_id}, {"_id": 0})
+    target = await db.product_categories.find_one({"id": body.target_id}, {"_id": 0})
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Category not found")
+    labels = await _labels_for_key(source["key"])
+    moved = 0
+    if labels:
+        res = await db.products.update_many({"category": {"$in": labels}}, {"$set": {"category": target["name"]}})
+        moved = res.modified_count
+    await db.product_categories.delete_one({"id": category_id})
+    await write_audit_log(current_user.id, "update", "product_category", category_id,
+                          f"merged '{source['name']}' into '{target['name']}' ({moved} products)", tenant_id=current_user.tenant_id)
+    return {"message": f"Merged into {target['name']}", "moved": moved}
+
+# ---------------------------------------------------------------------------
+# Deleted products (soft-deleted) can be restored by their own tenant's admins.
+# ---------------------------------------------------------------------------
+_PRODUCT_ADMIN_ROLES = [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
+
+@api_router.get("/product-trash")
+async def list_deleted_products(current_user: User = Depends(get_current_user)):
+    if current_user.role not in _PRODUCT_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query: dict = {"is_deleted": True}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+    proj = {"_id": 0, "id": 1, "name": 1, "category": 1, "tenant_id": 1, "price": 1, "stock": 1, "deleted_at": 1}
+    return await db.products.find(query, proj).sort("deleted_at", -1).to_list(200)
+
+@api_router.post("/product-trash/{product_id}/restore")
+async def restore_deleted_product(product_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role not in _PRODUCT_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Access denied")
+    product = await db.products.find_one({"id": product_id, "is_deleted": True}, {"_id": 0})
+    if not product or (current_user.role != UserRole.SUPER_ADMIN and product.get("tenant_id") != current_user.tenant_id):
+        raise HTTPException(status_code=404, detail="Deleted product not found")
+    scope = product.get("tenant_id")
+    dup_query: dict = {"name": {"$regex": f"^{re.escape(product['name'])}$", "$options": "i"}, "is_deleted": {"$ne": True}}
+    dup_query["$or"] = [{"tenant_id": scope}, {"tenant_id": None}, {"tenant_id": {"$exists": False}}] if scope else [{}]
+    dup = await db.products.find_one(dup_query, {"_id": 0, "name": 1})
+    if dup:
+        raise HTTPException(status_code=409, detail=f"A product named '{dup['name']}' already exists, so this one can't be restored.")
+    await db.products.update_one({"id": product_id}, {"$set": {"is_deleted": False}, "$unset": {"deleted_at": ""}})
+    if product.get("category"):
+        await _get_or_create_category(product["category"], current_user)  # make sure its category chip exists
+    await write_audit_log(current_user.id, "restore", "product", product_id, product["name"], tenant_id=current_user.tenant_id)
+    return {"message": f"'{product['name']}' restored"}
+
+# ---------------------------------------------------------------------------
+# Product backups: snapshots of products + categories (incl. soft-deleted rows).
+# Kept in the database (last BACKUP_KEEP); protects against accidental deletes
+# and bad edits. Download a snapshot to keep an off-server copy.
+# ---------------------------------------------------------------------------
+BACKUP_KEEP = 7
+
+async def create_products_backup(reason: str = "scheduled") -> dict:
+    snap_id = str(uuid.uuid4())
+    products = await db.products.find({}, {"_id": 0}).to_list(None)
+    categories = await db.product_categories.find({}, {"_id": 0}).to_list(None)
+    items = [{"snapshot_id": snap_id, "kind": "product", "doc": p} for p in products] + \
+            [{"snapshot_id": snap_id, "kind": "category", "doc": c} for c in categories]
+    for i in range(0, len(items), 500):
+        await db.product_backup_items.insert_many(items[i:i + 500])
+    meta = {"id": snap_id, "created_at": datetime.now(timezone.utc).isoformat(), "reason": reason,
+            "product_count": len(products), "category_count": len(categories)}
+    await db.product_backups.insert_one(dict(meta))
+    old = await db.product_backups.find({}, {"_id": 0, "id": 1}).sort("created_at", -1).skip(BACKUP_KEEP).to_list(1000)
+    for o in old:
+        await db.product_backup_items.delete_many({"snapshot_id": o["id"]})
+        await db.product_backups.delete_one({"id": o["id"]})
+    return meta
+
+async def run_nightly_product_backup():
+    """Background task: take a snapshot if the newest one is older than 24 hours."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            latest = await db.product_backups.find_one({}, {"_id": 0, "created_at": 1}, sort=[("created_at", -1)])
+            if not latest or datetime.fromisoformat(latest["created_at"]) < datetime.now(timezone.utc) - timedelta(hours=24):
+                meta = await create_products_backup("scheduled")
+                logger.info("Product backup created: %s products", meta["product_count"])
+        except Exception as e:
+            logger.error("Product backup failed: %s", e)
+        await asyncio.sleep(3600)
+
+def _require_super_admin(user: User):
+    if user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only the super admin can manage backups")
+
+@api_router.get("/backups/products")
+async def list_product_backups(current_user: User = Depends(get_current_user)):
+    _require_super_admin(current_user)
+    return await db.product_backups.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
+
+@api_router.post("/backups/products")
+async def create_product_backup_now(current_user: User = Depends(get_current_user)):
+    _require_super_admin(current_user)
+    meta = await create_products_backup("manual")
+    await write_audit_log(current_user.id, "create", "product_backup", meta["id"], f"{meta['product_count']} products", tenant_id=None)
+    return meta
+
+@api_router.get("/backups/products/{snapshot_id}/download")
+async def download_product_backup(snapshot_id: str, current_user: User = Depends(get_current_user)):
+    _require_super_admin(current_user)
+    meta = await db.product_backups.find_one({"id": snapshot_id}, {"_id": 0})
+    if not meta:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    items = await db.product_backup_items.find({"snapshot_id": snapshot_id}, {"_id": 0}).to_list(None)
+    payload = {"backup": meta,
+               "products": [i["doc"] for i in items if i["kind"] == "product"],
+               "categories": [i["doc"] for i in items if i["kind"] == "category"]}
+    import json as _json
+    return Response(content=_json.dumps(payload, default=str), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="products-backup-{meta["created_at"][:10]}.json"'})
+
+@api_router.post("/backups/products/{snapshot_id}/restore-missing")
+async def restore_missing_from_backup(snapshot_id: str, current_user: User = Depends(get_current_user)):
+    """Re-insert products/categories that no longer exist. Never overwrites or removes anything."""
+    _require_super_admin(current_user)
+    if not await db.product_backups.find_one({"id": snapshot_id}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail="Backup not found")
+    restored_products = restored_categories = 0
+    async for item in db.product_backup_items.find({"snapshot_id": snapshot_id}, {"_id": 0}):
+        doc = item["doc"]
+        if item["kind"] == "product":
+            if not await db.products.find_one({"id": doc["id"]}, {"_id": 1}):
+                await db.products.insert_one(dict(doc))
+                restored_products += 1
+        elif not await db.product_categories.find_one({"key": doc["key"]}, {"_id": 1}):
+            try:
+                await db.product_categories.insert_one(dict(doc))
+                restored_categories += 1
+            except Exception:
+                pass
+    await write_audit_log(current_user.id, "restore", "product_backup", snapshot_id,
+                          f"{restored_products} products, {restored_categories} categories", tenant_id=None)
+    return {"restored_products": restored_products, "restored_categories": restored_categories}
 
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate, current_user: User = Depends(get_current_user)):
@@ -2499,10 +2659,16 @@ async def get_assets(
     is_demo: Optional[bool] = Query(None, description="Filter demo assets"),
     department_id: Optional[str] = Query(None, description="Filter by department"),
     product_id: Optional[str] = Query(None, description="Filter by product"),
+    category: Optional[str] = Query(None, description="Filter by product category"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Results per page")
 ):
     query: dict = {"is_deleted": {"$ne": True}}
+    if category:
+        ckey = _category_key(category)
+        cat_product_ids = [p["id"] async for p in db.products.find({}, {"_id": 0, "id": 1, "category": 1})
+                           if _category_key(p.get("category")) == ckey]
+        query["product_id"] = {"$in": cat_product_ids}
     if current_user.role == UserRole.EMPLOYEE:
         # Employees can see available assets (for reservations) or their own assigned assets
         if status == "available":
@@ -2519,7 +2685,11 @@ async def get_assets(
     if department_id:
         query["department_id"] = department_id
     if product_id:
-        query["product_id"] = product_id
+        # an explicit product narrows the category filter instead of replacing it
+        if category and product_id not in query["product_id"]["$in"]:
+            query["product_id"] = {"$in": []}
+        else:
+            query["product_id"] = product_id
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -4770,8 +4940,20 @@ async def get_dashboard_charts(current_user: User = Depends(get_current_user_hyb
             "total": total,
         })
 
+    # Assets and purchase value per product category (names come from the global category list)
+    cat_names = {c["key"]: c["name"] for c in await db.product_categories.find({}, {"_id": 0, "key": 1, "name": 1}).to_list(1000)}
+    prod_key = {p["id"]: _category_key(p.get("category")) async for p in db.products.find({}, {"_id": 0, "id": 1, "category": 1})}
+    per_cat: dict = {}
+    async for a in db.assets.find({**tenant_q, "is_deleted": {"$ne": True}}, {"_id": 0, "product_id": 1, "purchase_price": 1}):
+        k = prod_key.get(a.get("product_id"), "")
+        row = per_cat.setdefault(k, {"name": cat_names.get(k, "Uncategorised") if k else "Uncategorised", "value": 0, "total_value": 0.0})
+        row["value"] += 1
+        row["total_value"] += a.get("purchase_price") or 0
+    assets_by_category = sorted(per_cat.values(), key=lambda r: -r["value"])
+
     return {
         "asset_status": asset_status_data,
+        "assets_by_category": assets_by_category,
         "monthly_orders": monthly_orders,
         "ticket_trends": ticket_trends,
         "ticket_status": ticket_status_data,
@@ -5846,6 +6028,8 @@ async def startup_db_client():
     await seed_default_tiers()
     await db.product_categories.create_index("key", unique=True, background=True)
     await seed_product_categories()
+    await db.product_backup_items.create_index("snapshot_id", background=True)
+    asyncio.create_task(run_nightly_product_backup())
     # Patch prices onto existing tiers that pre-date the price_monthly field
     tier_prices = {"tier-free": 0.0, "tier-pro": 999.0, "tier-enterprise": 2999.0}
     for tier_id, price in tier_prices.items():

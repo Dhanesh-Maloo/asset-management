@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Separator } from '../components/ui/separator';
-import { Package, Search, ShoppingCart, Plus, ArrowUpDown, Upload, FileSpreadsheet, Trash2, Pencil, ImagePlus, X } from 'lucide-react';
+import { Package, Search, ShoppingCart, Plus, ArrowUpDown, Upload, FileSpreadsheet, Trash2, Pencil, ImagePlus, X, Tags, Check, Merge, ArchiveRestore, Download, DatabaseBackup } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -70,6 +70,162 @@ const Products = () => {
 
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [categoryList, setCategoryList] = useState([]);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [renamingCategory, setRenamingCategory] = useState(null); // { id, name }
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [mergingCategory, setMergingCategory] = useState(null); // { id, name, targetId }
+
+  // Deleted products (restore) + backups
+  const [trashDialogOpen, setTrashDialogOpen] = useState(false);
+  const [trashItems, setTrashItems] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [trashBusy, setTrashBusy] = useState(false);
+
+  const fetchTrash = async () => {
+    try {
+      const res = await axios.get(`${API}/product-trash`);
+      setTrashItems(res.data);
+    } catch (error) {
+      categoryError(error, 'Failed to load deleted products');
+    }
+    if (user?.role === 'super_admin') {
+      try {
+        const res = await axios.get(`${API}/backups/products`);
+        setBackups(res.data);
+      } catch (error) {
+        console.error('Failed to load backups', error);
+      }
+    }
+  };
+
+  const openTrashDialog = () => {
+    setTrashDialogOpen(true);
+    fetchTrash();
+  };
+
+  const handleRestoreProduct = async (item) => {
+    setTrashBusy(true);
+    try {
+      await axios.post(`${API}/product-trash/${item.id}/restore`);
+      toast.success(`${item.name} restored`);
+      await Promise.all([fetchTrash(), fetchProducts(true), fetchCategories()]);
+    } catch (error) {
+      categoryError(error, 'Failed to restore product');
+    } finally {
+      setTrashBusy(false);
+    }
+  };
+
+  const handleBackupNow = async () => {
+    setTrashBusy(true);
+    try {
+      const res = await axios.post(`${API}/backups/products`);
+      toast.success(`Backup created (${res.data.product_count} products)`);
+      await fetchTrash();
+    } catch (error) {
+      categoryError(error, 'Failed to create backup');
+    } finally {
+      setTrashBusy(false);
+    }
+  };
+
+  const handleDownloadBackup = async (snap) => {
+    try {
+      const res = await axios.get(`${API}/backups/products/${snap.id}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `products-backup-${snap.created_at.slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      categoryError(error, 'Failed to download backup');
+    }
+  };
+
+  const handleRestoreMissing = async (snap) => {
+    if (!window.confirm('Re-add any products/categories from this backup that no longer exist? Nothing existing is changed or removed.')) return;
+    setTrashBusy(true);
+    try {
+      const res = await axios.post(`${API}/backups/products/${snap.id}/restore-missing`);
+      toast.success(`Restored ${res.data.restored_products} product(s), ${res.data.restored_categories} categorie(s)`);
+      await Promise.all([fetchProducts(true), fetchCategories()]);
+    } catch (error) {
+      categoryError(error, 'Failed to restore from backup');
+    } finally {
+      setTrashBusy(false);
+    }
+  };
+
+  const handleMergeCategory = async () => {
+    if (!mergingCategory?.targetId) return;
+    const target = categoryList.find(c => c.id === mergingCategory.targetId);
+    if (!window.confirm(`Move all "${mergingCategory.name}" products into "${target?.name}" and remove "${mergingCategory.name}"?`)) return;
+    setCategoryBusy(true);
+    try {
+      const res = await axios.post(`${API}/product-categories/${mergingCategory.id}/merge`, { target_id: mergingCategory.targetId });
+      toast.success(`Merged ${res.data.moved} product(s) into ${target?.name}`);
+      if (selectedCategory === mergingCategory.name) setSelectedCategory('all');
+      setMergingCategory(null);
+      await Promise.all([fetchCategories(), fetchProducts(true)]);
+    } catch (error) {
+      categoryError(error, 'Failed to merge categories');
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
+
+  const categoryError = (error, fallback) => {
+    const detail = error.response?.data?.detail;
+    toast.error(typeof detail === 'string' ? detail : fallback);
+  };
+
+  const handleAddCategory = async (e) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+    setCategoryBusy(true);
+    try {
+      await axios.post(`${API}/product-categories`, { name: newCategoryName.trim() });
+      toast.success('Category added');
+      setNewCategoryName('');
+      await fetchCategories();
+    } catch (error) {
+      categoryError(error, 'Failed to add category');
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
+
+  const handleRenameCategory = async () => {
+    if (!renamingCategory?.name.trim()) return;
+    setCategoryBusy(true);
+    try {
+      await axios.put(`${API}/product-categories/${renamingCategory.id}`, { name: renamingCategory.name.trim() });
+      toast.success('Category renamed');
+      setRenamingCategory(null);
+      await Promise.all([fetchCategories(), fetchProducts(true)]);
+    } catch (error) {
+      categoryError(error, 'Failed to rename category');
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
+
+  const handleDeleteCategory = async (cat) => {
+    if (!window.confirm(`Delete category "${cat.name}"?`)) return;
+    setCategoryBusy(true);
+    try {
+      await axios.delete(`${API}/product-categories/${cat.id}`);
+      toast.success('Category deleted');
+      if (selectedCategory === cat.name) setSelectedCategory('all');
+      await fetchCategories();
+    } catch (error) {
+      categoryError(error, 'Failed to delete category');
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
 
   const fetchCategories = async () => {
     try {
@@ -323,6 +479,16 @@ const Products = () => {
           </div>
           {canManageProducts && (
             <div className="flex gap-2">
+              {user?.role === 'super_admin' && (
+                <Button variant="outline" onClick={() => setCategoryDialogOpen(true)} data-testid="manage-categories-btn">
+                  <Tags className="h-4 w-4 mr-2" />
+                  Manage Categories
+                </Button>
+              )}
+              <Button variant="outline" onClick={openTrashDialog} data-testid="deleted-products-btn">
+                <ArchiveRestore className="h-4 w-4 mr-2" />
+                Deleted
+              </Button>
               <Button variant="outline" onClick={() => setImportDialogOpen(true)} data-testid="import-products-btn">
                 <Upload className="h-4 w-4 mr-2" />
                 Import
@@ -515,6 +681,119 @@ const Products = () => {
               Place Order
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deleted products + backups */}
+      <Dialog open={trashDialogOpen} onOpenChange={setTrashDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="deleted-products-dialog">
+          <DialogHeader>
+            <DialogTitle>Deleted Products</DialogTitle>
+            <DialogDescription>Deleted products are kept and can be restored.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {trashItems.length === 0 && <p className="text-sm text-muted-foreground">No deleted products.</p>}
+            {trashItems.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2" data-testid={`trash-row-${item.id}`}>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{item.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {item.category}{item.deleted_at ? ` · deleted ${new Date(item.deleted_at).toLocaleDateString()}` : ''}
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" disabled={trashBusy} onClick={() => handleRestoreProduct(item)}>
+                  <ArchiveRestore className="h-4 w-4 mr-1" />Restore
+                </Button>
+              </div>
+            ))}
+          </div>
+          {user?.role === 'super_admin' && (
+            <>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">Backups</h3>
+                  <p className="text-xs text-muted-foreground">A snapshot is taken automatically every 24 hours (last 7 kept).</p>
+                </div>
+                <Button size="sm" disabled={trashBusy} onClick={handleBackupNow} data-testid="backup-now-btn">
+                  <DatabaseBackup className="h-4 w-4 mr-1" />Back up now
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {backups.length === 0 && <p className="text-sm text-muted-foreground">No backups yet.</p>}
+                {backups.map((snap) => (
+                  <div key={snap.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+                    <div className="flex-1 text-sm">
+                      {new Date(snap.created_at).toLocaleString()}
+                      <span className="text-xs text-muted-foreground"> · {snap.product_count} products · {snap.reason}</span>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => handleDownloadBackup(snap)} aria-label="Download backup"><Download className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="outline" disabled={trashBusy} onClick={() => handleRestoreMissing(snap)}>Restore missing</Button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Categories Dialog (super admin) */}
+      <Dialog open={categoryDialogOpen} onOpenChange={(o) => { setCategoryDialogOpen(o); if (!o) { setRenamingCategory(null); setMergingCategory(null); } }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="manage-categories-dialog">
+          <DialogHeader>
+            <DialogTitle>Manage Categories</DialogTitle>
+            <DialogDescription>Categories are shared by all organisations. Renaming updates every product in the category; merging moves them into another category. A category with products can't be deleted.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddCategory} className="flex gap-2">
+            <Input value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="New category name" maxLength={100} data-testid="new-category-input" />
+            <Button type="submit" disabled={categoryBusy || !newCategoryName.trim()} data-testid="add-category-btn">
+              <Plus className="h-4 w-4 mr-1" />Add
+            </Button>
+          </form>
+          <div className="space-y-2">
+            {categoryList.length === 0 && <p className="text-sm text-muted-foreground">No categories yet.</p>}
+            {categoryList.map((cat) => (
+              <div key={cat.id} className="flex items-center gap-2 rounded-md border border-border px-3 py-2" data-testid={`category-row-${cat.id}`}>
+                {mergingCategory?.id === cat.id ? (
+                  <>
+                    <span className="text-sm whitespace-nowrap">Merge into</span>
+                    <select
+                      value={mergingCategory.targetId}
+                      onChange={(e) => setMergingCategory({ ...mergingCategory, targetId: e.target.value })}
+                      className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
+                      data-testid="merge-target-select"
+                    >
+                      <option value="">Choose category...</option>
+                      {categoryList.filter(c => c.id !== cat.id).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <Button size="icon" variant="ghost" disabled={categoryBusy || !mergingCategory.targetId} onClick={handleMergeCategory} aria-label="Confirm merge"><Check className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={() => setMergingCategory(null)} aria-label="Cancel merge"><X className="h-4 w-4" /></Button>
+                  </>
+                ) : renamingCategory?.id === cat.id ? (
+                  <>
+                    <Input
+                      autoFocus
+                      value={renamingCategory.name}
+                      onChange={(e) => setRenamingCategory({ ...renamingCategory, name: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleRenameCategory(); if (e.key === 'Escape') setRenamingCategory(null); }}
+                      maxLength={100}
+                      className="h-8"
+                    />
+                    <Button size="icon" variant="ghost" disabled={categoryBusy} onClick={handleRenameCategory} aria-label="Save"><Check className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={() => setRenamingCategory(null)} aria-label="Cancel"><X className="h-4 w-4" /></Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 font-medium">{cat.name}</span>
+                    <Badge variant="outline" className="text-xs">{cat.product_count ?? 0} product{cat.product_count === 1 ? '' : 's'}</Badge>
+                    <Button size="icon" variant="ghost" onClick={() => setRenamingCategory({ id: cat.id, name: cat.name })} aria-label={`Rename ${cat.name}`}><Pencil className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" disabled={categoryList.length < 2} onClick={() => setMergingCategory({ id: cat.id, name: cat.name, targetId: '' })} aria-label={`Merge ${cat.name}`} title="Merge into another category"><Merge className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" disabled={categoryBusy || (cat.product_count ?? 0) > 0} title={(cat.product_count ?? 0) > 0 ? 'Has products' : 'Delete'} onClick={() => handleDeleteCategory(cat)} aria-label={`Delete ${cat.name}`}><Trash2 className="h-4 w-4" /></Button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
 
