@@ -1884,12 +1884,134 @@ async def get_tenant_by_subdomain(subdomain: str):
     }
 
 # Product endpoints
+# ---------------------------------------------------------------------------
+# Product categories: one GLOBAL list shared by all tenants (names only).
+# Products themselves stay tenant-scoped. Near-duplicates (Laptop / Laptops /
+# "laptop ") share a normalized key and cannot both exist.
+# ---------------------------------------------------------------------------
+def _category_key(name: str) -> str:
+    """Normalize a category name so spelling/plural variants collapse to one key."""
+    k = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    if len(k) > 3:
+        if k.endswith("ies"):
+            k = k[:-3] + "y"
+        elif k.endswith(("sses", "xes", "ches", "shes")):
+            k = k[:-2]
+        elif k.endswith("s") and not k.endswith("ss"):
+            k = k[:-1]
+    return k
+
+class CategoryBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+async def _get_or_create_category(name: str, user: User) -> str:
+    """Return the canonical category name for `name`, creating the category if it is new."""
+    clean = " ".join((name or "").split())
+    key = _category_key(clean)
+    if not clean or not key:
+        raise HTTPException(status_code=400, detail="Category name must contain letters or numbers")
+    existing = await db.product_categories.find_one({"key": key}, {"_id": 0})
+    if existing:
+        return existing["name"]
+    doc = {"id": str(uuid.uuid4()), "name": clean, "key": key,
+           "created_by": user.id, "created_by_tenant": user.tenant_id,
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        await db.product_categories.insert_one(dict(doc))
+    except Exception:  # unique-key race: another request created it first
+        existing = await db.product_categories.find_one({"key": key}, {"_id": 0})
+        if existing:
+            return existing["name"]
+        raise
+    return clean
+
+async def seed_product_categories():
+    """Backfill the global list from categories already used by products (insert-only, never edits products)."""
+    counts: dict = {}
+    async for p in db.products.find({"is_deleted": {"$ne": True}}, {"_id": 0, "category": 1}):
+        raw = " ".join((p.get("category") or "").split())
+        key = _category_key(raw)
+        if key:
+            counts.setdefault(key, {}).setdefault(raw, 0)
+            counts[key][raw] += 1
+    for key, variants in counts.items():
+        if await db.product_categories.find_one({"key": key}, {"_id": 1}):
+            continue
+        name = sorted(variants.items(), key=lambda kv: (-kv[1], len(kv[0]), kv[0]))[0][0]
+        try:
+            await db.product_categories.insert_one({
+                "id": str(uuid.uuid4()), "name": name, "key": key, "created_by": None,
+                "created_by_tenant": None, "created_at": datetime.now(timezone.utc).isoformat()})
+        except Exception:
+            pass
+
+@api_router.get("/product-categories")
+async def list_product_categories(current_user: User = Depends(get_current_user)):
+    cats = await db.product_categories.find({}, {"_id": 0, "id": 1, "name": 1, "key": 1}).sort("name", 1).to_list(1000)
+    return cats
+
+@api_router.post("/product-categories")
+async def create_product_category(body: CategoryBody, current_user: User = Depends(get_current_user)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    clean = " ".join(body.name.split())
+    key = _category_key(clean)
+    if not key:
+        raise HTTPException(status_code=400, detail="Category name must contain letters or numbers")
+    existing = await db.product_categories.find_one({"key": key}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Category '{existing['name']}' already exists. Please use it instead.")
+    name = await _get_or_create_category(clean, current_user)
+    cat = await db.product_categories.find_one({"key": key}, {"_id": 0, "id": 1, "name": 1, "key": 1})
+    await write_audit_log(current_user.id, "create", "product_category", cat["id"], name, tenant_id=current_user.tenant_id)
+    return cat
+
+@api_router.put("/product-categories/{category_id}")
+async def rename_product_category(category_id: str, body: CategoryBody, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only the super admin can rename categories")
+    cat = await db.product_categories.find_one({"id": category_id}, {"_id": 0})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    new_name = " ".join(body.name.split())
+    new_key = _category_key(new_name)
+    if not new_key:
+        raise HTTPException(status_code=400, detail="Category name must contain letters or numbers")
+    clash = await db.product_categories.find_one({"key": new_key, "id": {"$ne": category_id}}, {"_id": 0, "name": 1})
+    if clash:
+        raise HTTPException(status_code=409, detail=f"Category '{clash['name']}' already exists.")
+    # Only the label changes; every product in this category (all tenants) is relabelled, none removed.
+    old_labels = {p.get("category") async for p in db.products.find({}, {"_id": 0, "category": 1})
+                  if _category_key(p.get("category")) == cat["key"]}
+    if old_labels:
+        await db.products.update_many({"category": {"$in": list(old_labels)}}, {"$set": {"category": new_name}})
+    await db.product_categories.update_one({"id": category_id}, {"$set": {"name": new_name, "key": new_key}})
+    await write_audit_log(current_user.id, "update", "product_category", category_id,
+                          f"{cat['name']} -> {new_name}", tenant_id=current_user.tenant_id)
+    return {"id": category_id, "name": new_name, "key": new_key}
+
+@api_router.delete("/product-categories/{category_id}")
+async def delete_product_category(category_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only the super admin can delete categories")
+    cat = await db.product_categories.find_one({"id": category_id}, {"_id": 0})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    async for p in db.products.find({"is_deleted": {"$ne": True}}, {"_id": 0, "category": 1}):
+        if _category_key(p.get("category")) == cat["key"]:
+            raise HTTPException(status_code=409, detail="This category still has products. Move or delete them first.")
+    await db.product_categories.delete_one({"id": category_id})
+    await write_audit_log(current_user.id, "delete", "product_category", category_id, cat["name"], tenant_id=current_user.tenant_id)
+    return {"message": "Category deleted"}
+
 @api_router.post("/products", response_model=Product)
 async def create_product(product_data: ProductCreate, current_user: User = Depends(get_current_user)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     
     product_dict = product_data.model_dump()
+    # Reuse the existing global category (Laptops -> Laptop) or register a new one
+    product_dict["category"] = await _get_or_create_category(product_dict["category"], current_user)
     # Assign tenant_id: super_admin can create global products (no tenant_id) or tenant-specific
     if current_user.role != UserRole.SUPER_ADMIN:
         product_dict["tenant_id"] = current_user.tenant_id
@@ -1978,6 +2100,14 @@ async def update_product(product_id: str, body: ProductUpdate, current_user: Use
     if not changes:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
+    if "category" in changes:
+        if _category_key(changes["category"]) == _category_key(product.get("category")):
+            changes.pop("category")  # same category, keep the stored label untouched
+        else:
+            changes["category"] = await _get_or_create_category(changes["category"], current_user)
+    if not changes:
+        return Product(**product)
+
     if "name" in changes and changes["name"].lower() != product["name"].lower():
         dup = await db.products.find_one({
             "id": {"$ne": product_id}, "is_deleted": {"$ne": True},
@@ -2040,6 +2170,9 @@ async def get_products(
         tenant = await db.tenants.find_one({"id": current_user.tenant_id}, {"_id": 0})
         if tenant and tenant.get("settings", {}).get("currency"):
             currency = tenant["settings"]["currency"]
+
+    for product in products:
+        product["category_key"] = _category_key(product.get("category"))
 
     # Apply currency conversion
     if currency and currency != "USD":
@@ -2138,7 +2271,7 @@ async def bulk_import_products(file: UploadFile = File(...), current_user: User 
             
             product = Product(
                 name=name,
-                category=category,
+                category=await _get_or_create_category(category, current_user),
                 description=description or name,
                 price=price,
                 stock=max(0, stock),
@@ -5711,6 +5844,8 @@ async def startup_db_client():
     await db.invite_tokens.create_index("token", background=True)
     await db.invite_tokens.create_index("email", background=True)
     await seed_default_tiers()
+    await db.product_categories.create_index("key", unique=True, background=True)
+    await seed_product_categories()
     # Patch prices onto existing tiers that pre-date the price_monthly field
     tier_prices = {"tier-free": 0.0, "tier-pro": 999.0, "tier-enterprise": 2999.0}
     for tier_id, price in tier_prices.items():

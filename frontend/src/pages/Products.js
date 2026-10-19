@@ -12,11 +12,29 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Separator } from '../components/ui/separator';
-import { Package, Search, ShoppingCart, Plus, ArrowUpDown, Upload, FileSpreadsheet, Trash2 } from 'lucide-react';
+import { Package, Search, ShoppingCart, Plus, ArrowUpDown, Upload, FileSpreadsheet, Trash2, Pencil, ImagePlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+const PRODUCTS_PARAMS = { limit: 500 };
+const MAX_IMAGE_MB = 2;
+const EMPTY_FORM = { name: '', category: '', description: '', specs: {}, image_url: '', stock: 0, price: 0 };
+
+// Mirrors the server's category normalisation (Laptop / Laptops / "laptop " -> "laptop").
+// Used only for hints and filtering; the server is the source of truth.
+const categoryKey = (name) => {
+  let k = (name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (k.length > 3) {
+    if (k.endsWith('ies')) k = `${k.slice(0, -3)}y`;
+    else if (/(sses|xes|ches|shes)$/.test(k)) k = k.slice(0, -2);
+    else if (k.endsWith('s') && !k.endsWith('ss')) k = k.slice(0, -1);
+  }
+  return k;
+};
+
+// Uploaded images are stored as relative "/api/..." paths; external links are used as-is.
+const resolveImg = (url) => (url && url.startsWith('/api/') ? `${BACKEND_URL}${url}` : url);
 
 const SORT_OPTIONS = [
   { value: 'name-asc', label: 'Name (A-Z)' },
@@ -46,19 +64,25 @@ const Products = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState(null);
   const [tenantCurrency, setTenantCurrency] = useState('USD');
+  const [editingId, setEditingId] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    category: '',
-    description: '',
-    specs: {},
-    image_url: '',
-    stock: 0,
-    price: 0
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [categoryList, setCategoryList] = useState([]);
+
+  const fetchCategories = async () => {
+    try {
+      const res = await axios.get(`${API}/product-categories`);
+      setCategoryList(res.data);
+    } catch (error) {
+      console.error('Failed to fetch categories', error);
+    }
+  };
 
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
     fetchTenantCurrency();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -80,8 +104,8 @@ const Products = () => {
 
   const fetchProducts = async (forceRefresh = false) => {
     try {
-      if (forceRefresh) cache.invalidate(`${API}/products{}`);
-      const res = await cachedGet(axios, `${API}/products`, {}, 60000);
+      if (forceRefresh) cache.invalidate(`${API}/products${JSON.stringify(PRODUCTS_PARAMS)}`);
+      const res = await cachedGet(axios, `${API}/products`, PRODUCTS_PARAMS, 60000);
       setProducts(res.data);
     } catch (error) {
       console.error('Failed to fetch products', error);
@@ -100,7 +124,7 @@ const Products = () => {
       );
     }
     if (selectedCategory !== 'all') {
-      filtered = filtered.filter(p => p.category === selectedCategory);
+      filtered = filtered.filter(p => (p.category_key || categoryKey(p.category)) === categoryKey(selectedCategory));
     }
     // Sort
     const [field, dir] = sortBy.split('-');
@@ -153,14 +177,81 @@ const Products = () => {
       toast.error('Stock quantity cannot be negative');
       return;
     }
+    setSaving(true);
     try {
-      await axios.post(`${API}/products`, { ...formData, price, stock });
-      toast.success('Product created successfully!');
-      setDialogOpen(false);
-      setFormData({ name: '', category: '', description: '', specs: {}, image_url: '', stock: 0, price: 0 });
+      // Typing "Laptops" when "Laptop" exists reuses "Laptop" instead of creating a duplicate
+      const category = existingCategoryMatch ? existingCategoryMatch.name : formData.category.trim();
+      if (editingId) {
+        const { name, description, image_url } = formData;
+        await axios.put(`${API}/products/${editingId}`, { name, category, description, image_url, price, stock });
+        toast.success('Product updated successfully!');
+      } else {
+        await axios.post(`${API}/products`, { ...formData, category, price, stock });
+        toast.success('Product created successfully!');
+      }
+      closeProductDialog();
       fetchProducts(true);
+      fetchCategories();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to create product');
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : `Failed to ${editingId ? 'update' : 'create'} product`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openAddDialog = () => {
+    setEditingId(null);
+    setFormData(EMPTY_FORM);
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (product) => {
+    setEditingId(product.id);
+    setFormData({
+      name: product.name,
+      category: product.category,
+      description: product.description || '',
+      specs: product.specs || {},
+      image_url: product.image_url || '',
+      stock: product.stock,
+      price: product.price,
+    });
+    setDialogOpen(true);
+  };
+
+  const closeProductDialog = () => {
+    setDialogOpen(false);
+    setEditingId(null);
+    setFormData(EMPTY_FORM);
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file');
+      return;
+    }
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      toast.error(`Image must be under ${MAX_IMAGE_MB} MB`);
+      return;
+    }
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await axios.post(`${API}/products/upload-image`, body, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setFormData((f) => ({ ...f, image_url: res.data.image_url }));
+      toast.success('Image uploaded');
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to upload image');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -208,7 +299,17 @@ const Products = () => {
     return symbols[currency] || '$';
   };
 
-  const categories = ['all', ...new Set(products.map(p => p.category))];
+  // Chips come from the global category list (shared by all tenants); fall back to product categories
+  const categories = ['all', ...(categoryList.length
+    ? categoryList.map(c => c.name)
+    : [...new Set(products.map(p => p.category))])];
+  const typedCategory = formData.category.trim();
+  const existingCategoryMatch = typedCategory
+    ? categoryList.find(c => c.key === categoryKey(typedCategory)) || null
+    : null;
+  const categorySuggestions = typedCategory
+    ? categoryList.filter(c => c.name.toLowerCase().includes(typedCategory.toLowerCase()) && c !== existingCategoryMatch).slice(0, 5)
+    : categoryList.slice(0, 8);
   const canManageProducts = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
 
   return (
@@ -226,7 +327,7 @@ const Products = () => {
                 <Upload className="h-4 w-4 mr-2" />
                 Import
               </Button>
-              <Button onClick={() => setDialogOpen(true)} data-testid="add-product-btn">
+              <Button onClick={openAddDialog} data-testid="add-product-btn">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Product
               </Button>
@@ -298,7 +399,7 @@ const Products = () => {
               <Card key={product.id} className="group border-border shadow-card hover:shadow-card-hover hover:border-primary/30 hover:-translate-y-0.5 transition-all duration-200 overflow-hidden" data-testid={`product-card-${product.id}`}>
                 <div className="h-48 bg-gradient-to-br from-muted to-secondary flex items-center justify-center overflow-hidden">
                   {product.image_url ? (
-                    <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" />
+                    <img src={resolveImg(product.image_url)} alt={product.name} className="h-full w-full object-cover" />
                   ) : (
                     <Package className="h-20 w-20 text-slate-400" />
                   )}
@@ -328,6 +429,18 @@ const Products = () => {
                     <ShoppingCart className="h-4 w-4 mr-2" />
                     {product.stock === 0 ? 'Out of Stock' : 'Order Now'}
                   </Button>
+                  {canManageProducts && (
+                    <Button
+                      className="w-full mt-2"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openEditDialog(product)}
+                      data-testid={`edit-product-btn-${product.id}`}
+                    >
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Edit
+                    </Button>
+                  )}
                   {canManageProducts && (
                     <Button
                       className="w-full mt-2"
@@ -406,11 +519,11 @@ const Products = () => {
       </Dialog>
 
       {/* Add Product Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl" data-testid="add-product-dialog">
+      <Dialog open={dialogOpen} onOpenChange={(o) => (o ? setDialogOpen(true) : closeProductDialog())}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="add-product-dialog">
           <DialogHeader>
-            <DialogTitle>Add New Product</DialogTitle>
-            <DialogDescription>Add a new product to the catalog</DialogDescription>
+            <DialogTitle>{editingId ? 'Edit Product' : 'Add New Product'}</DialogTitle>
+            <DialogDescription>{editingId ? 'Update this product in the catalog' : 'Add a new product to the catalog'}</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateProduct} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -420,14 +533,37 @@ const Products = () => {
               </div>
               <div>
                 <Label htmlFor="category">Category *</Label>
-                <Input id="category" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder="Laptops" required maxLength={100} data-testid="product-category-input" />
+                <Input id="category" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder="Laptop" required maxLength={100} autoComplete="off" data-testid="product-category-input" />
+                {existingCategoryMatch ? (
+                  <p className="text-xs text-muted-foreground mt-1" data-testid="category-existing-hint">
+                    Category &quot;{existingCategoryMatch.name}&quot; already exists and will be used.
+                  </p>
+                ) : typedCategory ? (
+                  <p className="text-xs text-muted-foreground mt-1" data-testid="category-new-hint">
+                    New category &quot;{typedCategory}&quot; will be created and shown to all organisations (your products stay private).
+                  </p>
+                ) : null}
+                {categorySuggestions.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {categorySuggestions.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, category: c.name })}
+                        className="text-xs px-2 py-0.5 rounded-full border border-border hover:bg-muted"
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div>
               <Label htmlFor="description">Description *</Label>
               <Textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="14-inch business laptop..." rows={3} required data-testid="product-description-input" />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="price">Price ({tenantCurrency}) *</Label>
                 <Input id="price" type="number" step="0.01" min="0.01" value={formData.price || ''} onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })} placeholder="1299.99" required data-testid="product-price-input" />
@@ -437,19 +573,38 @@ const Products = () => {
                 <Label htmlFor="stock">Stock Quantity *</Label>
                 <Input id="stock" type="number" min="0" value={formData.stock} onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} placeholder="25" required data-testid="product-stock-input" />
               </div>
-              <div>
-                <Label htmlFor="image_url">Image URL</Label>
-                <Input id="image_url" value={formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} placeholder="https://..." data-testid="product-image-input" maxLength={500} />
-                {formData.image_url && (
-                  <div className="mt-2 h-24 w-24 rounded border overflow-hidden bg-muted">
-                    <img src={formData.image_url} alt="Preview" className="h-full w-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+            </div>
+            <div className="space-y-2">
+              <Label>Product Image</Label>
+              <div className="flex items-start gap-4">
+                <div className="h-24 w-24 shrink-0 rounded border overflow-hidden bg-muted flex items-center justify-center">
+                  {formData.image_url ? (
+                    <img src={resolveImg(formData.image_url)} alt="Preview" className="h-full w-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                  ) : (
+                    <Package className="h-8 w-8 text-slate-400" />
+                  )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => document.getElementById('product-image-file').click()} data-testid="upload-image-btn">
+                      <ImagePlus className="h-4 w-4 mr-2" />
+                      {uploading ? 'Uploading...' : 'Upload image'}
+                    </Button>
+                    {formData.image_url && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setFormData({ ...formData, image_url: '' })}>
+                        <X className="h-4 w-4 mr-1" /> Remove
+                      </Button>
+                    )}
                   </div>
-                )}
+                  <input id="product-image-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden" onChange={handleImageUpload} data-testid="product-image-file-input" />
+                  <Input value={formData.image_url.startsWith('/api/') ? '' : formData.image_url} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} placeholder="...or paste an image link (https://...)" data-testid="product-image-input" maxLength={500} />
+                  <p className="text-xs text-muted-foreground">JPG, PNG, GIF or WebP, up to {MAX_IMAGE_MB} MB.</p>
+                </div>
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button type="submit" data-testid="submit-product-btn">Add Product</Button>
+              <Button type="button" variant="outline" onClick={closeProductDialog}>Cancel</Button>
+              <Button type="submit" disabled={saving || uploading} data-testid="submit-product-btn">{saving ? 'Saving...' : editingId ? 'Save Changes' : 'Add Product'}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
