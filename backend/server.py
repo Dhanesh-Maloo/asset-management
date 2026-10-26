@@ -2848,7 +2848,7 @@ async def assign_asset(asset_id: str, assignment: AssetAssign, current_user: Use
         raise HTTPException(status_code=403, detail="Access denied")
     
     asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
+    if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Asset not found")
     
     update_data = {
@@ -2876,7 +2876,7 @@ async def update_asset(asset_id: str, asset_update: AssetUpdate, current_user: U
         raise HTTPException(status_code=403, detail="Access denied")
     
     asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
+    if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Asset not found")
     
     update_data = asset_update.model_dump(exclude_unset=True)
@@ -2892,7 +2892,9 @@ async def update_asset(asset_id: str, asset_update: AssetUpdate, current_user: U
         asset_id=asset_id,
         action=action,
         performed_by=current_user.id,
-        notes=f"Status changed to {asset_update.status}"
+        notes="; ".join(
+            f"{k.replace('_', ' ').title()} set to {getattr(v, 'value', v)}" for k, v in update_data.items()
+        ) or "No changes"
     )
     await db.asset_history.insert_one(history.model_dump())
     
@@ -5526,6 +5528,36 @@ async def check_tier_limit(tenant_id: str, resource: str):
 # ═══════════════════════════════════════════════════════════════════════════
 # FEATURE 13: DUPLICATE SERIAL NUMBER CHECK
 # ═══════════════════════════════════════════════════════════════════════════
+
+@api_router.get("/assets/lookup")
+async def lookup_asset_by_code(
+    code: str = Query(..., min_length=1, max_length=200, description="Scanned serial number, asset tag or asset id"),
+    current_user: User = Depends(get_current_user_hybrid)
+):
+    """Find an asset from a scanned code (serial number, asset tag or id), scoped to the caller's tenant."""
+    code = code.strip()
+    ci = {"$regex": f"^{re.escape(code)}$", "$options": "i"}
+    query: dict = {
+        "is_deleted": {"$ne": True},
+        "$or": [{"id": code}, {"serial_number": ci}, {"asset_tag": ci}],
+    }
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+    asset = await db.assets.find_one(query, {"_id": 0})
+    if not asset:
+        return {"found": False}
+    product = await db.products.find_one({"id": asset.get("product_id")}, {"_id": 0, "name": 1, "category": 1})
+    assigned_name = None
+    if asset.get("assigned_to"):
+        u = await db.users.find_one({"id": asset["assigned_to"]}, {"_id": 0, "name": 1, "email": 1})
+        assigned_name = (u or {}).get("name") or (u or {}).get("email")
+    return {
+        "found": True,
+        "asset": asset,
+        "product_name": (product or {}).get("name"),
+        "product_category": (product or {}).get("category"),
+        "assigned_name": assigned_name,
+    }
 
 @api_router.get("/assets/check-serial")
 async def check_serial_number(

@@ -16,6 +16,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../componen
 import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
 import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera, QrCode } from 'lucide-react';
 import { BarcodeScannerDialog } from '../components/BarcodeScannerDialog';
+import { ScanResultDialog } from '../components/ScanResultDialog';
 import { ScanToAddDialog } from '../components/ScanToAddDialog';
 import { LabelPhotoDialog } from '../components/LabelPhotoDialog';
 import { MasterQRDialog } from '../components/MasterQRDialog';
@@ -58,6 +59,8 @@ const Assets = () => {
   const [labelPhotoOpen, setLabelPhotoOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanTarget, setScanTarget] = useState('lookup'); // 'lookup' | 'serial' | 'tag'
+  const [scanResult, setScanResult] = useState(null);
+  const [scanResultOpen, setScanResultOpen] = useState(false);
 
   // Edit Asset state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -373,20 +376,27 @@ const Assets = () => {
       return;
     }
 
-    // Lookup: this app's QR label, or a serial number / asset tag found in the code
-    const serialLower = (parsed.serial || '').toLowerCase();
-    const tagLower = (parsed.tag || '').toLowerCase();
-    const match = assets.find((a) =>
-      (parsed.assetId && a.id === parsed.assetId) ||
-      a.id === value ||
-      (serialLower && (a.serial_number || '').toLowerCase() === serialLower) ||
-      (serialLower && (a.asset_tag || '').toLowerCase() === serialLower) ||
-      (tagLower && (a.asset_tag || '').toLowerCase() === tagLower)
-    );
-    if (match) {
-      toast.success(`Found ${match.asset_tag}`);
-      navigate(`/assets/${match.id}`);
-    } else if (parsed.serial && canManage) {
+    // Lookup: this app's QR label, or a serial number / asset tag found in the code.
+    // Asks the server (not just the loaded page of assets) so any asset in the tenant is found.
+    const candidates = [...new Set([parsed.assetId, parsed.serial, parsed.tag, value].filter(Boolean))];
+    lookupScanned(candidates, parsed, noSerial);
+  };
+
+  const lookupScanned = async (candidates, parsed, noSerial) => {
+    try {
+      for (const code of candidates) {
+        const res = await axios.get(`${API}/assets/lookup`, { params: { code } });
+        if (res.data.found) {
+          setScanResult(res.data);
+          setScanResultOpen(true);
+          return;
+        }
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Could not look up that code');
+      return;
+    }
+    if (parsed.serial && canManage) {
       toast.info('Not in inventory yet — adding as a new asset');
       setAssetForm((f) => ({ ...f, serial_number: parsed.serial }));
       checkSerialNumber(parsed.serial);
@@ -934,6 +944,16 @@ const Assets = () => {
           setAssetForm((f) => ({ ...f, serial_number, product_id: product_id || f.product_id }));
           checkSerialNumber(serial_number);
         }}
+      />
+      <ScanResultDialog
+        open={scanResultOpen}
+        onOpenChange={setScanResultOpen}
+        result={scanResult}
+        users={users}
+        canManage={canManage}
+        onUpdated={fetchData}
+        onScanNext={() => { setScanResultOpen(false); openScanner('lookup'); }}
+        onOpenDetails={(id) => { setScanResultOpen(false); navigate(`/assets/${id}`); }}
       />
       <BarcodeScannerDialog
         open={scannerOpen}
