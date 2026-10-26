@@ -3503,9 +3503,7 @@ async def checkout_asset(asset_id: str, checkout_data: AssetCheckout, current_us
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = await _get_asset_for_user(asset_id, current_user)
     
     if asset["status"] not in [AssetStatus.AVAILABLE, AssetStatus.IN_USE]:
         raise HTTPException(status_code=400, detail="Asset not available for checkout")
@@ -3536,9 +3534,7 @@ async def return_asset(asset_id: str, return_data: AssetReturn, current_user: Us
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = await _get_asset_for_user(asset_id, current_user)
     
     if asset["status"] != AssetStatus.CHECKED_OUT:
         raise HTTPException(status_code=400, detail="Asset is not checked out")
@@ -3588,9 +3584,7 @@ async def return_asset(asset_id: str, return_data: AssetReturn, current_user: Us
 # Asset depreciation calculation
 @api_router.get("/assets/{asset_id}/depreciation")
 async def calculate_depreciation(asset_id: str, current_user: User = Depends(get_current_user)):
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = await _get_asset_for_user(asset_id, current_user)
     
     if not asset.get("purchase_date") or not asset.get("purchase_price"):
         return {"current_value": asset.get("purchase_price", 0), "depreciation": 0, "years": 0}
