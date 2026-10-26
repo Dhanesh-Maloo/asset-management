@@ -14,6 +14,7 @@ import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../components/ui/collapsible';
 import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/ui/dropdown-menu';
 import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera, QrCode } from 'lucide-react';
 import { BarcodeScannerDialog } from '../components/BarcodeScannerDialog';
 import { ScanResultDialog } from '../components/ScanResultDialog';
@@ -530,16 +531,25 @@ const Assets = () => {
               Scan
             </Button>
             {canManage && (
-              <Button variant="outline" onClick={handleExportCSV}>
-                <Download className="h-4 w-4 mr-2" />
-                CSV
-              </Button>
-            )}
-            {canManage && (
-              <Button variant="outline" onClick={handleExportExcel}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Excel
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" data-testid="download-menu-btn">
+                    <Download className="h-4 w-4 mr-2" />
+                    Download
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleExportCSV} data-testid="download-csv">
+                    <Download className="h-4 w-4 mr-2" />
+                    CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportExcel} data-testid="download-excel">
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Excel
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             {canManage && (
               <Button variant="outline" onClick={() => { setImportResult(null); setImportFile(null); setImportDialogOpen(true); }}>
