@@ -4239,13 +4239,18 @@ async def trigger_email_alerts(current_user: User = Depends(get_current_user)):
     await write_audit_log(current_user.id, "trigger_alerts", "system", "alerts", f"Sent to {sent_count} recipients", tenant_id=current_user.tenant_id)
     return {"message": f"Alert emails sent to {len(admin_emails)} admin(s)", "alerts_triggered": sent_count}
 
+async def _get_asset_for_user(asset_id: str, user: User) -> dict:
+    """Load an asset the caller may access: super admin any, everyone else only their own tenant's (else 404)."""
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    if not asset or (user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != user.tenant_id):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return asset
+
 # ── Feature 3: Asset History endpoint ────────────────────────────────────────
 
 @api_router.get("/assets/{asset_id}/history")
 async def get_asset_history(asset_id: str, current_user: User = Depends(get_current_user)):
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    await _get_asset_for_user(asset_id, current_user)
 
     history = await db.asset_history.find(
         {"asset_id": asset_id}, {"_id": 0}
@@ -5582,9 +5587,7 @@ async def check_serial_number(
 async def dispose_asset(asset_id: str, data: AssetDispose, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = await _get_asset_for_user(asset_id, current_user)
     if asset.get("status") == "disposed":
         raise HTTPException(status_code=400, detail="Asset is already disposed")
     update = {
@@ -5624,9 +5627,7 @@ async def upload_asset_document(
 ):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = await _get_asset_for_user(asset_id, current_user)
     if file.content_type not in ALLOWED_DOC_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: PDF, Word, Excel, JPEG, PNG")
     content = await file.read()
@@ -5651,15 +5652,14 @@ async def upload_asset_document(
 
 @api_router.get("/assets/{asset_id}/documents")
 async def get_asset_documents(asset_id: str, current_user: User = Depends(get_current_user_hybrid)):
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    await _get_asset_for_user(asset_id, current_user)
     docs = await db.asset_documents.find({"asset_id": asset_id}, {"_id": 0, "file_data": 0}).to_list(100)
     return docs
 
 
 @api_router.get("/assets/{asset_id}/documents/{doc_id}/download")
 async def download_asset_document(asset_id: str, doc_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    await _get_asset_for_user(asset_id, current_user)
     doc = await db.asset_documents.find_one({"id": doc_id, "asset_id": asset_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -5679,6 +5679,7 @@ async def download_asset_document(asset_id: str, doc_id: str, current_user: User
 async def delete_asset_document(asset_id: str, doc_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
+    await _get_asset_for_user(asset_id, current_user)
     result = await db.asset_documents.delete_one({"id": doc_id, "asset_id": asset_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -5693,9 +5694,7 @@ async def delete_asset_document(asset_id: str, doc_id: str, current_user: User =
 async def create_amc_contract(asset_id: str, data: AMCContractCreate, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = await _get_asset_for_user(asset_id, current_user)
     contract = AMCContract(asset_id=asset_id, tenant_id=asset["tenant_id"], **data.model_dump())
     await db.amc_contracts.insert_one(contract.model_dump())
     return contract
@@ -5703,6 +5702,7 @@ async def create_amc_contract(asset_id: str, data: AMCContractCreate, current_us
 
 @api_router.get("/assets/{asset_id}/amc")
 async def get_amc_contracts(asset_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    await _get_asset_for_user(asset_id, current_user)
     contracts = await db.amc_contracts.find({"asset_id": asset_id}, {"_id": 0}).to_list(50)
     return contracts
 
@@ -5712,7 +5712,10 @@ async def update_amc_contract(contract_id: str, data: AMCContractUpdate, current
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     update_data = data.model_dump(exclude_unset=True)
-    result = await db.amc_contracts.update_one({"id": contract_id}, {"$set": update_data})
+    scope = {"id": contract_id}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        scope["tenant_id"] = current_user.tenant_id
+    result = await db.amc_contracts.update_one(scope, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="AMC contract not found")
     return await db.amc_contracts.find_one({"id": contract_id}, {"_id": 0})
@@ -5722,7 +5725,10 @@ async def update_amc_contract(contract_id: str, data: AMCContractUpdate, current
 async def delete_amc_contract(contract_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    result = await db.amc_contracts.delete_one({"id": contract_id})
+    scope = {"id": contract_id}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        scope["tenant_id"] = current_user.tenant_id
+    result = await db.amc_contracts.delete_one(scope)
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="AMC contract not found")
     return {"message": "AMC contract deleted"}
