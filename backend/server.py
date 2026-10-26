@@ -5391,7 +5391,7 @@ async def get_activity_feed(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     current_user: User = Depends(get_current_user_hybrid)
 ):
-    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     skip = (page - 1) * limit
     query: dict = {}

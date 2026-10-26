@@ -264,7 +264,7 @@ function AppRouter() {
             <Route
               path="/activity"
               element={
-                <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin']}>
+                <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager']}>
                   <ActivityFeed />
                 </ProtectedRoute>
               }

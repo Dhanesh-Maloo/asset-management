@@ -265,7 +265,7 @@ const Dashboard = () => {
     );
   }
 
-  const canSeeActivity = ['super_admin', 'tenant_admin'].includes(user?.role);
+  const canSeeActivity = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
 
   const quickActions = [
     { title: 'Browse Catalog', desc: 'Explore available IT products and equipment', icon: Package, tint: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400', link: '/products' },
