@@ -4416,6 +4416,14 @@ async def export_orders_csv(current_user: User = Depends(get_current_user)):
 
 # ── Audit log endpoint ────────────────────────────────────────────────────────
 
+async def _tenant_audit_scope(tenant_id: Optional[str]) -> dict:
+    """Audit query for a tenant user: only their tenant's rows, never actions performed by super admins."""
+    super_ids = [u["id"] async for u in db.users.find({"role": UserRole.SUPER_ADMIN.value}, {"_id": 0, "id": 1})]
+    scope: dict = {"tenant_id": tenant_id}
+    if super_ids:
+        scope["user_id"] = {"$nin": super_ids}
+    return scope
+
 @api_router.get("/audit-log")
 async def get_audit_log(
     current_user: User = Depends(get_current_user),
@@ -4425,7 +4433,7 @@ async def get_audit_log(
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
     skip = (page - 1) * limit
-    query: dict = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    query: dict = {} if current_user.role == UserRole.SUPER_ADMIN else await _tenant_audit_scope(current_user.tenant_id)
     logs = await db.audit_log.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
     return logs
 
@@ -5388,13 +5396,17 @@ async def get_activity_feed(
     skip = (page - 1) * limit
     query: dict = {}
     if current_user.role != UserRole.SUPER_ADMIN:
-        query["tenant_id"] = current_user.tenant_id
+        query.update(await _tenant_audit_scope(current_user.tenant_id))
     if action_type:
         query["action"] = action_type
     if resource_type:
         query["resource"] = resource_type
     if user_id:
-        query["user_id"] = user_id
+        # keep the super-admin exclusion for tenant users even when filtering by user
+        if "user_id" in query:
+            query["$and"] = [{"user_id": query.pop("user_id")}, {"user_id": user_id}]
+        else:
+            query["user_id"] = user_id
     if date_from or date_to:
         ts_filter: dict = {}
         if date_from:
