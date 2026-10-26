@@ -311,6 +311,9 @@ class Product(BaseModel):
     image_url: str = ""
     stock: int = 0
     price: float = 0.0
+    # Price exactly as entered, in the tenant's own currency; avoids USD round-trip drift on display
+    price_original: Optional[float] = None
+    price_currency: Optional[str] = None
     tenant_id: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -2322,6 +2325,8 @@ async def create_product(product_data: ProductCreate, current_user: User = Depen
         if tenant_currency and tenant_currency != "USD":
             conversion_rates = await get_exchange_rates()
             rate = conversion_rates.get(tenant_currency, 1.0)
+            product_dict["price_original"] = product_dict["price"]
+            product_dict["price_currency"] = tenant_currency
             product_dict["price"] = round(product_dict["price"] / rate, 2)
 
     product = Product(**product_dict)
@@ -2407,6 +2412,8 @@ async def update_product(product_id: str, body: ProductUpdate, current_user: Use
         tenant_currency = tenant.get("settings", {}).get("currency") if tenant else None
         if tenant_currency and tenant_currency != "USD":
             rate = (await get_exchange_rates()).get(tenant_currency, 1.0)
+            changes["price_original"] = changes["price"]
+            changes["price_currency"] = tenant_currency
             changes["price"] = round(changes["price"] / rate, 2)
 
     await db.products.update_one({"id": product_id}, {"$set": changes})
@@ -2462,7 +2469,10 @@ async def get_products(
     if currency and currency != "USD":
         rate = conversion_rates.get(currency, 1.0)
         for product in products:
-            product["price"] = round(product["price"] * rate, 2)
+            if product.get("price_original") is not None and product.get("price_currency") == currency:
+                product["price"] = product["price_original"]  # exact entered value, no conversion
+            else:
+                product["price"] = round(product["price"] * rate, 2)
             product["display_currency"] = currency
     else:
         for product in products:
