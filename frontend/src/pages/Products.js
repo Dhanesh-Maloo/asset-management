@@ -244,6 +244,10 @@ const Products = () => {
   }, []);
 
   const fetchTenantCurrency = async () => {
+    if (user?.role === 'super_admin') {
+      setTenantCurrency('INR');
+      return;
+    }
     if (!user?.tenant_id) return;
     try {
       const res = await axios.get(`${API}/tenants/${user.tenant_id}`);

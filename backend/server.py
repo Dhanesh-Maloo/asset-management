@@ -2028,6 +2028,15 @@ def _category_key(name: str) -> str:
             k = k[:-1]
     return k
 
+async def _product_entry_currency(user: User, tenant_id: Optional[str]) -> Optional[str]:
+    """Currency the product form price is entered/shown in: super admin always uses INR, others their tenant's."""
+    if user.role == UserRole.SUPER_ADMIN:
+        return "INR"
+    if not tenant_id:
+        return None
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "settings": 1})
+    return tenant.get("settings", {}).get("currency") if tenant else None
+
 class CategoryBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
 
@@ -2319,15 +2328,12 @@ async def create_product(product_data: ProductCreate, current_user: User = Depen
 
     # Prices are stored canonically in USD. If the tenant's base currency isn't USD,
     # the price entered in the form is in that currency — convert it to USD for storage.
-    if scope_tenant_id:
-        tenant = await db.tenants.find_one({"id": scope_tenant_id}, {"_id": 0})
-        tenant_currency = tenant.get("settings", {}).get("currency") if tenant else None
-        if tenant_currency and tenant_currency != "USD":
-            conversion_rates = await get_exchange_rates()
-            rate = conversion_rates.get(tenant_currency, 1.0)
-            product_dict["price_original"] = product_dict["price"]
-            product_dict["price_currency"] = tenant_currency
-            product_dict["price"] = round(product_dict["price"] / rate, 2)
+    tenant_currency = await _product_entry_currency(current_user, scope_tenant_id)
+    if tenant_currency and tenant_currency != "USD":
+        rate = (await get_exchange_rates()).get(tenant_currency, 1.0)
+        product_dict["price_original"] = product_dict["price"]
+        product_dict["price_currency"] = tenant_currency
+        product_dict["price"] = round(product_dict["price"] / rate, 2)
 
     product = Product(**product_dict)
     await db.products.insert_one(product.model_dump())
@@ -2407,9 +2413,8 @@ async def update_product(product_id: str, body: ProductUpdate, current_user: Use
             raise HTTPException(status_code=409, detail=f"A product named '{dup['name']}' already exists.")
 
     # Prices are stored in USD; the form sends the tenant's currency (same as create)
-    if "price" in changes and product.get("tenant_id"):
-        tenant = await db.tenants.find_one({"id": product["tenant_id"]}, {"_id": 0})
-        tenant_currency = tenant.get("settings", {}).get("currency") if tenant else None
+    if "price" in changes:
+        tenant_currency = await _product_entry_currency(current_user, product.get("tenant_id"))
         if tenant_currency and tenant_currency != "USD":
             rate = (await get_exchange_rates()).get(tenant_currency, 1.0)
             changes["price_original"] = changes["price"]
@@ -2457,7 +2462,9 @@ async def get_products(
     conversion_rates = await get_exchange_rates()
 
     # Get tenant currency if not specified
-    if not currency and current_user.tenant_id:
+    if not currency and current_user.role == UserRole.SUPER_ADMIN:
+        currency = "INR"
+    elif not currency and current_user.tenant_id:
         tenant = await db.tenants.find_one({"id": current_user.tenant_id}, {"_id": 0})
         if tenant and tenant.get("settings", {}).get("currency"):
             currency = tenant["settings"]["currency"]
