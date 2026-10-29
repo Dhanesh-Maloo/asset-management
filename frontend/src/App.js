@@ -11,7 +11,6 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Orders from './pages/Orders';
 import Assets from './pages/Assets';
-import AssetDetail from './pages/AssetDetail';
 import Tickets from './pages/Tickets';
 import Users from './pages/Users';
 import Tenants from './pages/Tenants';
@@ -35,6 +34,7 @@ import InviteAccept from './pages/InviteAccept';
 import MasterQRs from './pages/MasterQRs';
 import MasterQRDetail from './pages/MasterQRDetail';
 import PublicMasterQR from './pages/PublicMasterQR';
+import { AssetRoute } from './pages/AssetRoute';
 import { useAuth } from './contexts/AuthContext';
 
 // Staff get the full detail page; everyone else gets the public, no-login view.
@@ -119,11 +119,7 @@ function AppRouter() {
 
             <Route
               path="/assets/:assetId"
-              element={
-                <ProtectedRoute>
-                  <AssetDetail />
-                </ProtectedRoute>
-              }
+              element={<AssetRoute />}
             />
             
             <Route

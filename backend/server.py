@@ -4796,9 +4796,8 @@ async def list_master_qrs(current_user: User = Depends(get_current_user_hybrid))
 _public_qr_hits: dict = {}  # {ip: [timestamp, ...]}
 PUBLIC_QR_MAX_PER_MINUTE = 60
 
-@api_router.get("/public/master-qrs/{master_id}")
-async def get_public_master_qr(master_id: str, request: Request):
-    """No-login view of a master QR. Only non-sensitive fields; 404 unless the owner left it public."""
+def _rate_limit_public_qr(request: Request) -> None:
+    """Per-IP limit shared by the no-login QR endpoints; raises 429 when exceeded."""
     ip = get_client_ip(request)
     now = datetime.now(timezone.utc).timestamp()
     hits = [t for t in _public_qr_hits.get(ip, []) if now - t < 60]
@@ -4806,6 +4805,42 @@ async def get_public_master_qr(master_id: str, request: Request):
         raise HTTPException(status_code=429, detail="Too many requests. Please try again in a minute.")
     hits.append(now)
     _public_qr_hits[ip] = hits
+
+@api_router.get("/public/assets/{asset_id}")
+async def get_public_asset(asset_id: str, request: Request):
+    """No-login view of one asset, reached by scanning its QR code. Non-sensitive fields only:
+    no price, no assignee, no documents. The unguessable asset id is what gates access."""
+    _rate_limit_public_qr(request)
+    assets = await _live_assets_for([asset_id], {})
+    if not assets:
+        raise HTTPException(status_code=404, detail="This QR code is not available")
+    a = assets[0]
+    tenant = await db.tenants.find_one({"id": a.get("tenant_id")}, {"_id": 0, "name": 1})
+    category = None
+    if a.get("product_id"):
+        product = await db.products.find_one({"id": a["product_id"]}, {"_id": 0, "category": 1})
+        category = (product or {}).get("category")
+    department = None
+    if a.get("department_id"):
+        dept = await db.departments.find_one({"id": a["department_id"]}, {"_id": 0, "name": 1})
+        department = (dept or {}).get("name")
+    return {
+        "organization": (tenant or {}).get("name", ""),
+        "asset_tag": a.get("asset_tag", ""),
+        "product_name": a.get("product_name", ""),
+        "category": category or "",
+        "serial_number": a.get("serial_number", ""),
+        "status": a.get("status", ""),
+        "location": a.get("location", ""),
+        "department": department or "",
+        "purchase_date": a.get("purchase_date"),
+        "warranty_end_date": a.get("warranty_end_date"),
+    }
+
+@api_router.get("/public/master-qrs/{master_id}")
+async def get_public_master_qr(master_id: str, request: Request):
+    """No-login view of a master QR. Only non-sensitive fields; 404 unless the owner left it public."""
+    _rate_limit_public_qr(request)
 
     doc = await db.master_qrs.find_one({"id": master_id}, {"_id": 0})
     if not doc or not doc.get("is_public", True):
