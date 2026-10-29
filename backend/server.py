@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, Response, UploadFile, File, Query
 from fastapi.responses import StreamingResponse, RedirectResponse
 import hashlib
+import secrets
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -1895,6 +1896,75 @@ async def login(credentials: UserLogin, request: Request, response: Response):
     user.pop("password_hash", None)
     token = create_access_token({"sub": user["id"], "email": user["email"], "role": user["role"]})
     await write_audit_log(user["id"], "login", "user", user["id"], f"Login from {client_ip}", tenant_id=user.get("tenant_id"))
+    return {"token": token, "user": User(**user)}
+
+# ── "Sign in on phone" QR login ──────────────────────────────────────────────
+# A signed-in user mints a short-lived, single-use code, shows it as a QR, and a second device
+# redeems it for a normal login session. Only the SHA-256 of the code is stored.
+QR_LOGIN_TTL_SECONDS = 90
+_qr_login_rate_limit_store: dict = {}   # redeem attempts: {ip: [timestamp, ...]}
+
+def _qr_login_hash(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()
+
+class QRLoginRedeem(BaseModel):
+    code: str = Field(..., min_length=20, max_length=200)
+
+@api_router.post("/auth/qr-login/create")
+async def create_qr_login(request: Request, current_user: User = Depends(get_current_user)):
+    """Mint a one-time code (valid 90 seconds) that signs another device into the caller's own account.
+    Super admin only."""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+    code = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    doc_id = str(uuid.uuid4())
+    await db.qr_logins.insert_one({
+        "id": doc_id,
+        "code_hash": _qr_login_hash(code),
+        "user_id": current_user.id,
+        "used": False,
+        "used_at": None,
+        "created_at": now,
+        "expires_at": now + timedelta(seconds=QR_LOGIN_TTL_SECONDS),
+    })
+    await write_audit_log(current_user.id, "qr_login_create", "user", current_user.id,
+                          f"Phone sign-in QR created from {get_client_ip(request)}", tenant_id=current_user.tenant_id)
+    return {"id": doc_id, "code": code, "expires_in": QR_LOGIN_TTL_SECONDS}
+
+@api_router.get("/auth/qr-login/{qr_id}/status")
+async def qr_login_status(qr_id: str, current_user: User = Depends(get_current_user)):
+    """Lets the signed-in screen show when its QR was used or expired. Only the creator can ask."""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+    doc = await db.qr_logins.find_one({"id": qr_id, "user_id": current_user.id}, {"_id": 0, "used": 1, "expires_at": 1})
+    if not doc:
+        return {"status": "expired"}
+    if doc["used"]:
+        return {"status": "used"}
+    expires_at = doc["expires_at"].replace(tzinfo=timezone.utc) if doc["expires_at"].tzinfo is None else doc["expires_at"]
+    return {"status": "expired" if expires_at <= datetime.now(timezone.utc) else "pending"}
+
+@api_router.post("/auth/qr-login/redeem")
+async def redeem_qr_login(body: QRLoginRedeem, request: Request):
+    """Exchange a valid, unused code for a login session. Each code works exactly once."""
+    client_ip = get_client_ip(request)
+    check_rate_limit(client_ip, _qr_login_rate_limit_store)
+    now = datetime.now(timezone.utc)
+    # Atomic claim: two simultaneous scans can't both succeed
+    doc = await db.qr_logins.find_one_and_update(
+        {"code_hash": _qr_login_hash(body.code), "used": False, "expires_at": {"$gt": now}},
+        {"$set": {"used": True, "used_at": now, "used_ip": client_ip}},
+    )
+    if not doc:
+        raise HTTPException(status_code=400, detail="This QR code is invalid or has expired. Generate a new one.")
+    user = await db.users.find_one({"id": doc["user_id"]}, {"_id": 0})
+    # Re-check the role now: an account demoted since the code was made must not get a session
+    if not user or user.get("role") != UserRole.SUPER_ADMIN.value:
+        raise HTTPException(status_code=400, detail="This QR code is invalid or has expired. Generate a new one.")
+    user.pop("password_hash", None)
+    token = create_access_token({"sub": user["id"], "email": user["email"], "role": user["role"]})
+    await write_audit_log(user["id"], "qr_login", "user", user["id"], f"Phone sign-in via QR from {client_ip}", tenant_id=user.get("tenant_id"))
     return {"token": token, "user": User(**user)}
 
 # Password Reset endpoints
@@ -6635,6 +6705,8 @@ async def startup_db_client():
     await db.audit_log.create_index("timestamp", background=True)
     await db.departments.create_index("tenant_id", background=True)
     await db.asset_history.create_index("asset_id", background=True)
+    await db.qr_logins.create_index("code_hash", unique=True, background=True)
+    await db.qr_logins.create_index("expires_at", expireAfterSeconds=3600, background=True)  # purge an hour after expiry
     await db.locations.create_index("tenant_id", background=True)
     await db.vendors.create_index("tenant_id", background=True)
     await db.licenses.create_index("tenant_id", background=True)

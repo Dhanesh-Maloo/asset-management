@@ -35,6 +35,7 @@ import MasterQRs from './pages/MasterQRs';
 import MasterQRDetail from './pages/MasterQRDetail';
 import PublicMasterQR from './pages/PublicMasterQR';
 import { AssetRoute } from './pages/AssetRoute';
+import { QrLogin } from './pages/QrLogin';
 import { useAuth } from './contexts/AuthContext';
 
 // Staff get the full detail page; everyone else gets the public, no-login view.
@@ -65,6 +66,7 @@ function AppRouter() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/invite/:token" element={<InviteAccept />} />
+      <Route path="/qr-login" element={<QrLogin />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
             
             <Route

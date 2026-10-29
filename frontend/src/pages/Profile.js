@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
+import { PhoneLoginQR } from '../components/PhoneLoginQR';
 import { User, Laptop, Ticket, ShoppingCart, Key, Save, Eye, EyeOff, Plus, Copy, Trash2, KeyRound } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -139,6 +140,7 @@ const Profile = () => {
     { id: 'assets', label: `My Assets (${profile?.assigned_assets?.length || 0})` },
     { id: 'tickets', label: `Open Tickets (${profile?.open_tickets?.length || 0})` },
     { id: 'orders', label: `Recent Orders (${profile?.recent_orders?.length || 0})` },
+    ...(user?.role === 'super_admin' ? [{ id: 'phone-login', label: 'Sign in on phone' }] : []),
     { id: 'security', label: 'Change Password' },
     { id: 'api-keys', label: 'API Keys' },
   ];
@@ -382,6 +384,9 @@ const Profile = () => {
             </Card>
           </div>
         )}
+
+        {/* Phone sign-in Tab */}
+        {activeTab === 'phone-login' && user?.role === 'super_admin' && <PhoneLoginQR />}
 
         {/* Security Tab */}
         {activeTab === 'security' && (
