@@ -418,6 +418,10 @@ class Asset(BaseModel):
 
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+class AssetDetail(Asset):
+    """Single-asset response: adds the photo data URL, kept off list responses because it is large."""
+    photo_url: Optional[str] = None
+
 class AssetCreate(BaseModel):
     asset_tag: str = Field(..., min_length=1, max_length=100)
     product_id: str
@@ -5318,6 +5322,7 @@ async def upload_asset_photo(asset_id: str, file: UploadFile = File(...), curren
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image must be under 5MB")
+    await _get_asset_for_user(asset_id, current_user)
     import base64
     b64 = base64.b64encode(content).decode()
     photo_data_url = f"data:{file.content_type};base64,{b64}"
@@ -5330,6 +5335,7 @@ async def upload_asset_photo(asset_id: str, file: UploadFile = File(...), curren
 async def delete_asset_photo(asset_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
+    await _get_asset_for_user(asset_id, current_user)
     result = await db.assets.update_one({"id": asset_id}, {"$unset": {"photo_url": ""}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -6493,7 +6499,7 @@ async def list_invites(current_user: User = Depends(get_current_user)):
 
 
 # Include router
-@api_router.get("/assets/{asset_id}", response_model=Asset)
+@api_router.get("/assets/{asset_id}", response_model=AssetDetail)
 async def get_asset(asset_id: str, current_user: User = Depends(get_current_user)):
     """One asset, with the same visibility rules as the asset list."""
     asset = await db.assets.find_one({"id": asset_id, "is_deleted": {"$ne": True}}, {"_id": 0})
@@ -6503,7 +6509,7 @@ async def get_asset(asset_id: str, current_user: User = Depends(get_current_user
         raise HTTPException(status_code=404, detail="Asset not found")
     if current_user.role == UserRole.EMPLOYEE and asset.get("assigned_to") != current_user.id and asset.get("status") != "available":
         raise HTTPException(status_code=404, detail="Asset not found")
-    return Asset(**asset)
+    return AssetDetail(**asset)
 
 app.include_router(api_router)
 
