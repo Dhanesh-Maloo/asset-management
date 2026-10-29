@@ -4807,8 +4807,9 @@ def _rate_limit_public_qr(request: Request) -> None:
     _public_qr_hits[ip] = hits
 
 def _display_org_name(name: str) -> str:
-    """Brand casing for display: always "IValue", whatever casing the tenant name was stored with."""
-    return re.sub(r"ivalue", "IValue", name or "", flags=re.IGNORECASE)
+    """Brand casing for display: wherever a name contains iValue/I Value/ivalue it reads "IValue".
+    Names without it (other tenants) are returned untouched."""
+    return re.sub(r"(?<![A-Za-z])i\s?value", "IValue", name or "", flags=re.IGNORECASE)
 
 @api_router.get("/public/assets/{asset_id}")
 async def get_public_asset(asset_id: str, request: Request):
@@ -4831,7 +4832,7 @@ async def get_public_asset(asset_id: str, request: Request):
     holder_id = await _holder_of(a) if a.get("status") in ("assigned", "in_use", "under_maintenance", "checked_out") else None
     holder = None
     if holder_id:
-        holder_user = await db.users.find_one({"id": holder_id, "tenant_id": a.get("tenant_id")}, {"_id": 0, "name": 1})
+        holder_user = await db.users.find_one({"id": holder_id}, {"_id": 0, "name": 1})
         holder = (holder_user or {}).get("name")
     return {
         "organization": _display_org_name((tenant or {}).get("name", "")),
