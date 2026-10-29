@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package } from 'lucide-react';
 import { toast } from 'sonner';
+import { EmployeeAssetsDialog } from '../components/EmployeeAssetsDialog';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -31,6 +32,8 @@ const Users = () => {
   const [inviteResult, setInviteResult] = useState(null);
   const [inviteSending, setInviteSending] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [assetCounts, setAssetCounts] = useState({});
+  const [assetsFor, setAssetsFor] = useState(null);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -59,6 +62,13 @@ const Users = () => {
       if (user.role === 'super_admin') {
         const tenantsRes = await axios.get(`${API}/tenants`);
         setTenants(tenantsRes.data);
+      }
+
+      try {
+        const countsRes = await axios.get(`${API}/users/assets-summary`);
+        setAssetCounts(countsRes.data);
+      } catch {
+        // counts are optional; the list still works without them
       }
 
       try {
@@ -204,6 +214,7 @@ const Users = () => {
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Role</TableHead>
+                      <TableHead>Assets</TableHead>
                       {user.role === 'super_admin' && <TableHead>Tenant</TableHead>}
                       <TableHead>Status</TableHead>
                       <TableHead>Created</TableHead>
@@ -217,6 +228,12 @@ const Users = () => {
                         <TableCell className="font-medium">{u.name}</TableCell>
                         <TableCell>{u.email}</TableCell>
                         <TableCell>{getRoleBadge(u.role)}</TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="ghost" className="h-8" onClick={() => setAssetsFor(u)} data-testid={`view-assets-btn-${u.id}`}>
+                            <Package className="h-3.5 w-3.5 mr-1.5" />
+                            {assetCounts[u.id] || 0}
+                          </Button>
+                        </TableCell>
                         {user.role === 'super_admin' && (
                           <TableCell>
                             {tenants.find(t => t.id === u.tenant_id)?.name || 'N/A'}
@@ -284,6 +301,8 @@ const Users = () => {
           </Card>
         )}
       </div>
+
+      <EmployeeAssetsDialog employee={assetsFor} onClose={() => setAssetsFor(null)} />
 
       {/* Invite User Dialog */}
       <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) { setInviteResult(null); } }}>

@@ -39,6 +39,7 @@ const AssetDetail = () => {
   const [depreciation, setDepreciation] = useState(null);
   const [maintenanceSchedules, setMaintenanceSchedules] = useState([]);
   const [assetHistory, setAssetHistory] = useState([]);
+  const [holders, setHolders] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -126,6 +127,13 @@ const AssetDetail = () => {
         setAssetHistory(histRes.data);
       } catch {
         // History may not be available
+      }
+
+      try {
+        const holdersRes = await axios.get(`${API}/assets/${assetId}/assignment-history`);
+        setHolders(holdersRes.data);
+      } catch {
+        // Holder history is optional
       }
       
     } catch (error) {
@@ -901,7 +909,39 @@ const AssetDetail = () => {
             </Card>
           </TabsContent>
           {/* History Tab */}
-          <TabsContent value="history">
+          <TabsContent value="history" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Assignment History</CardTitle>
+                <CardDescription>Everyone who has held this asset</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {holders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No assignments recorded yet.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Holder</TableHead>
+                        <TableHead>From</TableHead>
+                        <TableHead>To</TableHead>
+                        <TableHead>Ended by</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {holders.map((p, i) => (
+                        <TableRow key={`${p.user_id}-${i}`}>
+                          <TableCell className="font-medium">{p.user_name}</TableCell>
+                          <TableCell>{p.from ? new Date(p.from).toLocaleDateString() : '—'}</TableCell>
+                          <TableCell>{p.to ? new Date(p.to).toLocaleDateString() : <Badge variant="outline">Current</Badge>}</TableCell>
+                          <TableCell className="capitalize text-muted-foreground">{(p.ended_by || '').replace(/_/g, ' ') || '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
@@ -937,6 +977,11 @@ const AssetDetail = () => {
                               </span>
                             </div>
                             {h.notes && <p className="text-sm text-slate-600">{h.notes}</p>}
+                            {(h.from_user_name || h.to_user_name) && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {h.from_user_name || 'Store'} → {h.to_user_name || 'Store'}
+                              </p>
+                            )}
                             <p className="text-xs text-muted-foreground mt-1">
                               By: {h.performed_by_name || 'System'}
                             </p>

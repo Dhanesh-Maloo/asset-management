@@ -11,7 +11,7 @@ import asyncio
 import contextvars
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
-from typing import List, Optional
+from typing import Dict, List, Optional
 import uuid
 import re
 from email.mime.multipart import MIMEMultipart
@@ -503,6 +503,35 @@ class AssetHistory(BaseModel):
     performed_by: str
     date: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     notes: str = ""
+    # Holder tracking: who the asset moved from / to (null when going to/from the store)
+    from_user_id: Optional[str] = None
+    from_user_name: Optional[str] = None
+    to_user_id: Optional[str] = None
+    to_user_name: Optional[str] = None
+
+async def _holder_of(asset: dict) -> Optional[str]:
+    """Current holder id of an asset: checked-out person wins over assignee."""
+    if asset.get("status") == "checked_out" and asset.get("checked_out_to"):
+        return asset["checked_out_to"]
+    return asset.get("assigned_to")
+
+async def _user_names(user_ids: List[str]) -> Dict[str, str]:
+    """Map user id -> display name for the given ids (missing ids are omitted)."""
+    ids = list({i for i in user_ids if i})
+    if not ids:
+        return {}
+    users = await db.users.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(len(ids))
+    return {u["id"]: u.get("name") or u.get("email") or u["id"] for u in users}
+
+async def _record_history(asset_id: str, action: str, performed_by: str, notes: str = "",
+                          from_user_id: Optional[str] = None, to_user_id: Optional[str] = None) -> None:
+    """Insert an asset history entry, resolving holder names so the timeline never shows raw ids."""
+    names = await _user_names([from_user_id, to_user_id])
+    await db.asset_history.insert_one(AssetHistory(
+        asset_id=asset_id, action=action, performed_by=performed_by, notes=notes,
+        from_user_id=from_user_id, from_user_name=names.get(from_user_id) if from_user_id else None,
+        to_user_id=to_user_id, to_user_name=names.get(to_user_id) if to_user_id else None,
+    ).model_dump())
 
 class Department(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -2851,22 +2880,23 @@ async def assign_asset(asset_id: str, assignment: AssetAssign, current_user: Use
     if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Asset not found")
     
+    previous_holder = await _holder_of(asset)
     update_data = {
         "assigned_to": assignment.assigned_to,
         "assigned_date": datetime.now(timezone.utc).isoformat(),
         "status": AssetStatus.ASSIGNED
     }
-    
+
     await db.assets.update_one({"id": asset_id}, {"$set": update_data})
-    
-    history = AssetHistory(
-        asset_id=asset_id,
-        action="assigned",
-        performed_by=current_user.id,
-        notes=f"Assigned to {assignment.assigned_to}"
-    )
-    await db.asset_history.insert_one(history.model_dump())
-    
+
+    names = await _user_names([previous_holder, assignment.assigned_to])
+    to_name = names.get(assignment.assigned_to, assignment.assigned_to)
+    notes = f"Assigned to {to_name}"
+    if previous_holder:
+        notes = f"Reassigned from {names.get(previous_holder, previous_holder)} to {to_name}"
+    await _record_history(asset_id, "assigned", current_user.id, notes,
+                          from_user_id=previous_holder, to_user_id=assignment.assigned_to)
+
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return Asset(**updated_asset)
 
@@ -2881,23 +2911,23 @@ async def update_asset(asset_id: str, asset_update: AssetUpdate, current_user: U
     
     update_data = asset_update.model_dump(exclude_unset=True)
     await db.assets.update_one({"id": asset_id}, {"$set": update_data})
-    
+
     action = "updated"
+    from_user_id = None
     if asset_update.status == AssetStatus.DISPOSED:
         action = "disposed"
     elif asset_update.status == AssetStatus.AVAILABLE:
         action = "retrieved"
-    
-    history = AssetHistory(
-        asset_id=asset_id,
-        action=action,
-        performed_by=current_user.id,
-        notes="; ".join(
+        from_user_id = await _holder_of(asset)
+
+    await _record_history(
+        asset_id, action, current_user.id,
+        "; ".join(
             f"{k.replace('_', ' ').title()} set to {getattr(v, 'value', v)}" for k, v in update_data.items()
-        ) or "No changes"
+        ) or "No changes",
+        from_user_id=from_user_id,
     )
-    await db.asset_history.insert_one(history.model_dump())
-    
+
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return Asset(**updated_asset)
 
@@ -3413,13 +3443,12 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
         if asset is None:
             raise HTTPException(status_code=409, detail="No available units in store for this product")
 
-    history = AssetHistory(
-        asset_id=asset["id"],
-        action="dispatched",
-        performed_by=current_user.id,
-        notes=f"Dispatched from store against Order {order_id[:8]}"
+    recipient_name = (await _user_names([order["user_id"]])).get(order["user_id"], order["user_id"])
+    await _record_history(
+        asset["id"], "dispatched", current_user.id,
+        f"Dispatched from store to {recipient_name} against Order {order_id[:8]}",
+        to_user_id=order["user_id"],
     )
-    await db.asset_history.insert_one(history.model_dump())
 
     update_data = {
         "status": OrderStatus.FULFILLED,
@@ -3518,13 +3547,12 @@ async def checkout_asset(asset_id: str, checkout_data: AssetCheckout, current_us
     
     await db.assets.update_one({"id": asset_id}, {"$set": update_data})
     
-    history = AssetHistory(
-        asset_id=asset_id,
-        action="checked_out",
-        performed_by=current_user.id,
-        notes=f"Checked out to {checkout_data.checked_out_to}, expected return: {checkout_data.expected_return_date}"
+    to_name = (await _user_names([checkout_data.checked_out_to])).get(checkout_data.checked_out_to, checkout_data.checked_out_to)
+    await _record_history(
+        asset_id, "checked_out", current_user.id,
+        f"Checked out to {to_name}, expected return: {checkout_data.expected_return_date}",
+        from_user_id=await _holder_of(asset), to_user_id=checkout_data.checked_out_to,
     )
-    await db.asset_history.insert_one(history.model_dump())
     
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return Asset(**updated_asset)
@@ -3567,13 +3595,12 @@ async def return_asset(asset_id: str, return_data: AssetReturn, current_user: Us
     if days_overdue > 0:
         notes_parts.append(f"Returned {days_overdue} day(s) late. Fine: ${fine_amount:.2f}")
 
-    history = AssetHistory(
-        asset_id=asset_id,
-        action="returned",
-        performed_by=current_user.id,
-        notes=" | ".join(notes_parts)
-    )
-    await db.asset_history.insert_one(history.model_dump())
+    returned_by = asset.get("checked_out_to")
+    if returned_by:
+        returned_name = (await _user_names([returned_by])).get(returned_by, returned_by)
+        notes_parts.insert(0, f"Returned by {returned_name}")
+    await _record_history(asset_id, "returned", current_user.id, " | ".join(notes_parts),
+                          from_user_id=returned_by)
 
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     result = Asset(**updated_asset).model_dump()
@@ -4259,7 +4286,186 @@ async def get_asset_history(asset_id: str, current_user: User = Depends(get_curr
         uid = h.get("performed_by")
         h["performed_by_name"] = user_map.get(uid, {}).get("name", "Unknown")
 
+    # Fill holder names for entries written before names were stored
+    holder_ids = [h.get(k) for h in history for k in ("from_user_id", "to_user_id")]
+    holder_names = await _user_names(holder_ids)
+    for h in history:
+        if h.get("from_user_id") and not h.get("from_user_name"):
+            h["from_user_name"] = holder_names.get(h["from_user_id"])
+        if h.get("to_user_id") and not h.get("to_user_name"):
+            h["to_user_name"] = holder_names.get(h["to_user_id"])
+
     return history
+
+def _holder_periods(entries: List[dict], uid: Optional[str] = None) -> List[dict]:
+    """Fold oldest-first history entries into holding periods.
+
+    With `uid`, only that user's periods are returned; otherwise every holder's. A period is
+    {user_id, user_name, from, to, action, ended_by}; `to` is None while still held.
+    """
+    open_periods: Dict[str, dict] = {}
+    periods: List[dict] = []
+    for e in entries:
+        frm, to = e.get("from_user_id"), e.get("to_user_id")
+        if frm and (uid is None or frm == uid):
+            p = open_periods.pop(frm, None)
+            if p is None:  # start predates holder tracking
+                p = {"user_id": frm, "user_name": e.get("from_user_name"), "from": None, "action": None}
+            p.update({"to": e["date"], "ended_by": e["action"]})
+            periods.append(p)
+        if to and (uid is None or to == uid):
+            open_periods[to] = {"user_id": to, "user_name": e.get("to_user_name"), "from": e["date"],
+                                "to": None, "action": e["action"], "ended_by": None}
+    return periods + list(open_periods.values())
+
+@api_router.get("/assets/{asset_id}/assignment-history")
+async def get_asset_assignment_history(asset_id: str, current_user: User = Depends(get_current_user)):
+    """Every person who has held this asset, newest first, with from/to dates."""
+    await _get_asset_for_user(asset_id, current_user)
+    entries = await db.asset_history.find(
+        {"asset_id": asset_id, "$or": [{"to_user_id": {"$ne": None}}, {"from_user_id": {"$ne": None}}]},
+        {"_id": 0},
+    ).sort("date", 1).to_list(500)
+    periods = _holder_periods(entries)
+    names = await _user_names([p["user_id"] for p in periods])
+    for p in periods:
+        p["user_name"] = names.get(p["user_id"]) or p.get("user_name") or "Unknown"
+    periods.sort(key=lambda p: p["from"] or "", reverse=True)
+    return periods
+
+async def _scoped_employee(user_id: str, current_user: User) -> dict:
+    """Load an employee the caller may view: managers within their tenant, anyone else only themself."""
+    privileged = [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]
+    if current_user.role not in privileged and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target or (current_user.role != UserRole.SUPER_ADMIN and target.get("tenant_id") != current_user.tenant_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    return target
+
+def _held_query(uid: str) -> dict:
+    """Mongo filter for assets an employee currently holds (assigned or checked out)."""
+    return {
+        "is_deleted": {"$ne": True},
+        "$or": [
+            {"assigned_to": uid, "status": {"$in": ["assigned", "in_use", "under_maintenance"]}},
+            {"checked_out_to": uid, "status": "checked_out"},
+        ],
+    }
+
+_LEGACY_HOLDER_NOTE = re.compile(r"^(Assigned to|Checked out to) ([0-9a-f-]{36})(.*)$")
+
+@api_router.post("/assets/history/backfill")
+async def backfill_history_holders(current_user: User = Depends(get_current_user)):
+    """Idempotently add holder names/ids to history entries written before holder tracking.
+
+    Recovers the new holder from the old "Assigned to <id>" / "Checked out to <id>" notes and
+    derives the previous holder by replaying each asset's entries in order.
+    """
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    asset_query = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    asset_ids = [a["id"] async for a in db.assets.find(asset_query, {"_id": 0, "id": 1})]
+
+    updated = 0
+    for i in range(0, len(asset_ids), 200):
+        chunk = asset_ids[i:i + 200]
+        entries = await db.asset_history.find({"asset_id": {"$in": chunk}}, {"_id": 0}).sort("date", 1).to_list(None)
+        by_asset: Dict[str, List[dict]] = {}
+        for e in entries:
+            by_asset.setdefault(e["asset_id"], []).append(e)
+        names = await _user_names([
+            m.group(2) for e in entries if (m := _LEGACY_HOLDER_NOTE.match(e.get("notes", "")))
+        ] + [e.get(k) for e in entries for k in ("from_user_id", "to_user_id")])
+
+        for es in by_asset.values():
+            holder: Optional[str] = None
+            for e in es:
+                changes: dict = {}
+                m = _LEGACY_HOLDER_NOTE.match(e.get("notes", ""))
+                if "to_user_id" not in e and m and e["action"] in ("assigned", "checked_out"):
+                    to_id = m.group(2)
+                    changes["to_user_id"] = to_id
+                    changes["to_user_name"] = names.get(to_id)
+                    if holder:
+                        changes["from_user_id"], changes["from_user_name"] = holder, names.get(holder)
+                    if names.get(to_id):
+                        changes["notes"] = f"{m.group(1)} {names[to_id]}{m.group(3)}"
+                elif "from_user_id" not in e and e["action"] in ("returned", "retrieved") and holder:
+                    changes["from_user_id"], changes["from_user_name"] = holder, names.get(holder)
+                if changes:
+                    await db.asset_history.update_one({"id": e["id"]}, {"$set": changes})
+                    updated += 1
+                    e.update(changes)
+                if e.get("to_user_id"):
+                    holder = e["to_user_id"]
+                elif e["action"] in ("returned", "retrieved"):
+                    holder = None
+    return {"updated": updated}
+
+@api_router.get("/users/assets-summary")
+async def get_users_assets_summary(current_user: User = Depends(get_current_user)):
+    """Map of user id -> number of assets currently held, for the employee list."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    base = {"is_deleted": {"$ne": True}}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        base["tenant_id"] = current_user.tenant_id
+    counts: Dict[str, int] = {}
+    async for a in db.assets.find(
+        {**base, "status": {"$in": ["assigned", "in_use", "under_maintenance", "checked_out"]}},
+        {"_id": 0, "assigned_to": 1, "checked_out_to": 1, "status": 1},
+    ):
+        holder = a.get("checked_out_to") if a["status"] == "checked_out" else a.get("assigned_to")
+        if holder:
+            counts[holder] = counts.get(holder, 0) + 1
+    return counts
+
+@api_router.get("/users/{user_id}/assets")
+async def get_user_assets(user_id: str, current_user: User = Depends(get_current_user)):
+    """Assets an employee holds now, plus the ones they held before."""
+    target = await _scoped_employee(user_id, current_user)
+    tenant_filter = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    asset_fields = {"_id": 0, "id": 1, "asset_tag": 1, "serial_number": 1, "status": 1, "product_id": 1,
+                    "assigned_date": 1, "checkout_date": 1, "expected_return_date": 1, "location": 1}
+
+    current = await db.assets.find({**tenant_filter, **_held_query(user_id)}, asset_fields).to_list(500)
+
+    entries = await db.asset_history.find(
+        {"$or": [{"to_user_id": user_id}, {"from_user_id": user_id}]}, {"_id": 0}
+    ).sort("date", 1).to_list(2000)
+    by_asset: Dict[str, List[dict]] = {}
+    for e in entries:
+        by_asset.setdefault(e["asset_id"], []).append(e)
+
+    past_rows: List[dict] = []
+    for aid, es in by_asset.items():
+        for p in _holder_periods(es, uid=user_id):
+            if p["to"] is not None:
+                past_rows.append({**p, "asset_id": aid})
+    past_asset_ids = list({r["asset_id"] for r in past_rows} | {a["id"] for a in current})
+    meta = {a["id"]: a for a in await db.assets.find(
+        {**tenant_filter, "id": {"$in": past_asset_ids}}, asset_fields).to_list(len(past_asset_ids) or 1)}
+
+    product_ids = list({a.get("product_id") for a in meta.values() if a.get("product_id")})
+    products = {p["id"]: p.get("name", "") for p in await db.products.find(
+        {"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(product_ids) or 1)}
+
+    def shape(a: dict) -> dict:
+        return {**a, "product_name": products.get(a.get("product_id"), "")}
+
+    past = [
+        {"asset": shape(meta[r["asset_id"]]), "assigned_on": r["from"], "released_on": r["to"],
+         "ended_by": r["ended_by"]}
+        for r in past_rows if r["asset_id"] in meta
+    ]
+    past.sort(key=lambda r: r["released_on"] or "", reverse=True)
+    return {
+        "user": {"id": target["id"], "name": target.get("name"), "email": target.get("email"),
+                 "employee_id": target.get("employee_id")},
+        "current": [shape(a) for a in current],
+        "past": past,
+    }
 
 # ── Feature 5: Department endpoints ──────────────────────────────────────────
 
@@ -4971,9 +5177,17 @@ async def update_transfer(transfer_id: str, action: str, current_user: User = De
         updates["approved_at"] = datetime.now(timezone.utc).isoformat()
     if action == "completed":
         # Actually move the asset
+        before = await db.assets.find_one({"id": transfer["asset_id"]}, {"_id": 0})
         await db.assets.update_one(
             {"id": transfer["asset_id"]},
             {"$set": {"assigned_to": transfer["to_user_id"], "status": "assigned"}}
+        )
+        previous = (await _holder_of(before)) if before else transfer.get("from_user_id")
+        names = await _user_names([previous, transfer["to_user_id"]])
+        await _record_history(
+            transfer["asset_id"], "transferred", current_user.id,
+            f"Transferred from {names.get(previous, 'store')} to {names.get(transfer['to_user_id'], transfer['to_user_id'])}",
+            from_user_id=previous, to_user_id=transfer["to_user_id"],
         )
         await write_audit_log(current_user.id, "transfer_complete", "asset", transfer["asset_id"],
                               f"Transferred to {transfer['to_user_id']}", tenant_id=current_user.tenant_id)
@@ -5072,8 +5286,10 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
     )
 
     history_note = f"Dispatched from store to {recipient.get('name', body.assigned_to)}" + (f" — {body.notes}" if body.notes else "")
+    recipient_name = recipient.get("name") or recipient.get("email") or body.assigned_to
     await db.asset_history.insert_many([
-        AssetHistory(asset_id=a["id"], action="dispatched", performed_by=current_user.id, notes=history_note).model_dump()
+        AssetHistory(asset_id=a["id"], action="dispatched", performed_by=current_user.id, notes=history_note,
+                     to_user_id=body.assigned_to, to_user_name=recipient_name).model_dump()
         for a in assets
     ])
     await write_audit_log(current_user.id, "bulk_dispatch", "assets", ",".join(body.ids), f"{result.modified_count} assets dispatched to {body.assigned_to}", tenant_id=current_user.tenant_id)
