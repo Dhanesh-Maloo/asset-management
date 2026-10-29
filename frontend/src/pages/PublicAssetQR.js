@@ -58,6 +58,7 @@ export const PublicAssetQR = () => {
             </div>
 
             <div className="mt-4 bg-white dark:bg-slate-900 border rounded-2xl divide-y shadow-sm">
+              <Row label={data.assigned_label} value={data.assigned_to} />
               <Row label="Category" value={data.category} />
               <Row label="Serial number" value={data.serial_number} />
               <Row label="Department" value={data.department} />

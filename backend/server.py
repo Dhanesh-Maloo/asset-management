@@ -4806,10 +4806,14 @@ def _rate_limit_public_qr(request: Request) -> None:
     hits.append(now)
     _public_qr_hits[ip] = hits
 
+def _display_org_name(name: str) -> str:
+    """Brand casing for display: always "IValue", whatever casing the tenant name was stored with."""
+    return re.sub(r"ivalue", "IValue", name or "", flags=re.IGNORECASE)
+
 @api_router.get("/public/assets/{asset_id}")
 async def get_public_asset(asset_id: str, request: Request):
     """No-login view of one asset, reached by scanning its QR code. Non-sensitive fields only:
-    no price, no assignee, no documents. The unguessable asset id is what gates access."""
+    no price, no documents; the current holder's name is shown. The unguessable asset id gates access."""
     _rate_limit_public_qr(request)
     assets = await _live_assets_for([asset_id], {})
     if not assets:
@@ -4824,8 +4828,15 @@ async def get_public_asset(asset_id: str, request: Request):
     if a.get("department_id"):
         dept = await db.departments.find_one({"id": a["department_id"]}, {"_id": 0, "name": 1})
         department = (dept or {}).get("name")
+    holder_id = await _holder_of(a) if a.get("status") in ("assigned", "in_use", "under_maintenance", "checked_out") else None
+    holder = None
+    if holder_id:
+        holder_user = await db.users.find_one({"id": holder_id, "tenant_id": a.get("tenant_id")}, {"_id": 0, "name": 1})
+        holder = (holder_user or {}).get("name")
     return {
-        "organization": (tenant or {}).get("name", ""),
+        "organization": _display_org_name((tenant or {}).get("name", "")),
+        "assigned_to": holder or "",
+        "assigned_label": "Checked out to" if a.get("status") == "checked_out" else "Assigned to",
         "asset_tag": a.get("asset_tag", ""),
         "product_name": a.get("product_name", ""),
         "category": category or "",
@@ -4850,7 +4861,7 @@ async def get_public_master_qr(master_id: str, request: Request):
     return {
         "name": doc["name"],
         "location": doc.get("location", ""),
-        "organization": (tenant or {}).get("name", ""),
+        "organization": _display_org_name((tenant or {}).get("name", "")),
         "asset_count": len(assets),
         "assets": [
             {
