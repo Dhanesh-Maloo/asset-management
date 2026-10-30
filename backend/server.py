@@ -3337,7 +3337,7 @@ async def import_employees(
     email_adapter = TypeAdapter(EmailStr)
     allowed_roles = {r.value for r in UserRole if r != UserRole.SUPER_ADMIN}
 
-    created, errors, seen_emails = 0, [], set()
+    created, errors, warnings, seen_emails = 0, [], [], set()
     for i, row in enumerate(rows, start=2):
         if not any(str(v or "").strip() for v in row.values()):
             continue
@@ -3363,14 +3363,15 @@ async def import_employees(
             errors.append(f"Row {i}: unknown role '{role}'")
             continue
         group_name = cell(row, "group", "group_name")
-        if group_name and group_name.lower() not in group_map:
-            errors.append(f"Row {i}: group '{group_name}' not found")
-            continue
+        group_id = group_map.get(group_name.lower()) if group_name else None
+        if group_name and not group_id:
+            # Group is optional: still import the employee, just without a group
+            warnings.append(f"Row {i} ({email}): group '{group_name}' not found, imported without a group")
         try:
             await _insert_employee(
                 email=email, first_name=first, last_name=last, employee_id=cell(row, "employee_id", "Employee ID"),
                 role=UserRole(role), tenant_id=target_tenant,
-                group_id=group_map.get(group_name.lower()) if group_name else None,
+                group_id=group_id,
                 password=cell(row, "password") or None,
             )
             seen_emails.add(email.lower())
@@ -3378,7 +3379,7 @@ async def import_employees(
         except HTTPException as e:
             errors.append(f"Row {i} ({email}): {e.detail}")
     await write_audit_log(current_user.id, "bulk_create", "user", "import", f"Imported {created} employees", tenant_id=target_tenant)
-    return {"created": created, "skipped": len(errors), "errors": errors}
+    return {"created": created, "skipped": len(errors), "errors": errors, "warnings": warnings}
 
 async def _get_manageable_user(user_id: str, current_user: User) -> dict:
     """Load a user the caller may manage passwords for (404 rather than 403 across tenants)."""

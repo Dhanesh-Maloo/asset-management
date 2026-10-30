@@ -532,6 +532,11 @@ const Users = () => {
                     {importResult.errors.map((err, i) => (<li key={i} className="text-xs text-red-600">{err}</li>))}
                   </ul>
                 )}
+                {importResult.warnings?.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 max-h-40 overflow-y-auto">
+                    {importResult.warnings.map((w, i) => (<li key={i} className="text-xs text-amber-700">{w}</li>))}
+                  </ul>
+                )}
               </div>
             )}
           </div>
