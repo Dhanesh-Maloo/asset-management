@@ -11,7 +11,7 @@ import logging
 import asyncio
 import contextvars
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict, TypeAdapter
 from typing import Dict, List, Optional
 import uuid
 import re
@@ -248,6 +248,23 @@ class UserCreate(BaseModel):
     role: UserRole
     tenant_id: Optional[str] = None
     group_id: Optional[str] = None
+
+class UserListItem(User):
+    has_password: bool = False
+
+class EmployeeCreate(BaseModel):
+    """Admin-created employee. Password is optional; the employee can set one later via reset link."""
+    email: EmailStr
+    password: Optional[str] = None
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    employee_id: Optional[str] = Field(None, max_length=50)
+    role: UserRole = UserRole.EMPLOYEE
+    tenant_id: Optional[str] = None
+    group_id: Optional[str] = None
+
+class AdminSetPassword(BaseModel):
+    new_password: str
 
 class Group(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -905,6 +922,9 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # Employees created without a password have no hash; they cannot log in until one is set.
+    if not hashed_password:
+        return False
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict) -> str:
@@ -3184,7 +3204,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     return stats
 
 # Users endpoint
-@api_router.get("/users", response_model=List[User])
+@api_router.get("/users", response_model=List[UserListItem])
 async def get_users(current_user: User = Depends(get_current_user)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -3192,9 +3212,217 @@ async def get_users(current_user: User = Depends(get_current_user)):
     query = {}
     if current_user.role in [UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
         query["tenant_id"] = current_user.tenant_id
-    
-    users = await db.users.find(query, {"_id": 0, "password_hash": 0}).to_list(1000)
-    return [User(**u) for u in users]
+
+    users = await db.users.find(query, {"_id": 0}).to_list(1000)
+    # Never send the hash itself, only whether one exists
+    return [UserListItem(**{**u, "has_password": bool(u.get("password_hash"))}) for u in users]
+
+def _resolve_employee_tenant(current_user: User, requested_tenant_id: Optional[str]) -> str:
+    """Tenant admins always act on their own tenant; super admins must name one."""
+    if current_user.role == UserRole.SUPER_ADMIN:
+        if not requested_tenant_id:
+            raise HTTPException(status_code=400, detail="Tenant is required")
+        return requested_tenant_id
+    return current_user.tenant_id
+
+async def _insert_employee(*, email: str, first_name: str, last_name: str, employee_id: Optional[str],
+                           role: UserRole, tenant_id: str, group_id: Optional[str], password: Optional[str]) -> User:
+    """Validate and insert one employee. Raises HTTPException on any rule violation."""
+    email = email.strip()
+    if await db.users.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    employee_id = (employee_id or "").strip() or None
+    if employee_id and await db.users.find_one({"tenant_id": tenant_id, "employee_id": employee_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="Employee ID already in use")
+    if password:
+        validate_password_strength(password)
+    await check_tier_limit(tenant_id, "users")
+    first_name, last_name = first_name.strip(), last_name.strip()
+    user = User(
+        email=email, first_name=first_name, last_name=last_name,
+        name=f"{first_name} {last_name}".strip(), employee_id=employee_id,
+        role=role, tenant_id=tenant_id, group_id=group_id or None,
+    )
+    doc = user.model_dump()
+    # No password: empty hash, so login is impossible until one is set or a reset link is used
+    doc["password_hash"] = hash_password(password) if password else ""
+    await db.users.insert_one(doc)
+    return user
+
+@api_router.post("/users")
+async def create_employee(data: EmployeeCreate, current_user: User = Depends(get_current_user)):
+    """Add one employee. Password is optional."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if data.role == UserRole.SUPER_ADMIN and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Cannot create super admin accounts")
+    tenant_id = _resolve_employee_tenant(current_user, data.tenant_id)
+    if data.group_id and not await db.groups.find_one({"id": data.group_id, "tenant_id": tenant_id}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="Group not found")
+    user = await _insert_employee(
+        email=data.email, first_name=data.first_name, last_name=data.last_name, employee_id=data.employee_id,
+        role=data.role, tenant_id=tenant_id, group_id=data.group_id, password=data.password,
+    )
+    return {"message": "Employee added successfully", "user": user, "has_password": bool(data.password)}
+
+BULK_EMPLOYEE_MAX_ROWS = 1000
+BULK_EMPLOYEE_MAX_BYTES = 2 * 1024 * 1024
+
+@api_router.get("/users/import/template")
+async def download_employee_import_template(current_user: User = Depends(get_current_user)):
+    """CSV template for bulk employee import."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    import io, csv as csv_module
+    output = io.StringIO()
+    writer = csv_module.writer(output)
+    writer.writerow(["first_name", "last_name", "email", "employee_id", "role", "group", "password"])
+    writer.writerow(["Asha", "Mehta", "asha.mehta@example.com", "EMP-001", "employee", "", ""])
+    writer.writerow(["Ravi", "Shah", "ravi.shah@example.com", "EMP-002", "asset_manager", "IT Team", ""])
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=employee_import_template.csv"},
+    )
+
+@api_router.post("/users/import")
+async def import_employees(
+    file: UploadFile = File(...),
+    tenant_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+):
+    """Bulk-create employees from a CSV/Excel file. Password column is optional per row."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    target_tenant = _resolve_employee_tenant(current_user, tenant_id)
+
+    content = await file.read()
+    if len(content) > BULK_EMPLOYEE_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File is too large (max 2 MB)")
+    filename = (file.filename or "").lower()
+    rows: list = []
+    try:
+        if filename.endswith(".csv"):
+            import io, csv as csv_module
+            reader = csv_module.DictReader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
+            rows = list(reader)
+        elif filename.endswith(".xlsx"):
+            import io, openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+            headers = None
+            for row in wb.active.iter_rows(values_only=True):
+                if headers is None:
+                    headers = [str(h).strip() if h is not None else "" for h in row]
+                    continue
+                rows.append(dict(zip(headers, [str(c).strip() if c is not None else "" for c in row])))
+        else:
+            raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
+    if len(rows) > BULK_EMPLOYEE_MAX_ROWS:
+        raise HTTPException(status_code=400, detail=f"Too many rows (max {BULK_EMPLOYEE_MAX_ROWS} per import)")
+
+    def cell(row: dict, *names: str) -> str:
+        norm = {re.sub(r"[\s_-]+", "", str(k or "").lower()): v for k, v in row.items()}
+        for n in names:
+            v = norm.get(re.sub(r"[\s_-]+", "", n.lower()))
+            if v not in (None, ""):
+                return str(v).strip()
+        return ""
+
+    groups = await db.groups.find({"tenant_id": target_tenant}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    group_map = {g["name"].strip().lower(): g["id"] for g in groups}
+    email_adapter = TypeAdapter(EmailStr)
+    allowed_roles = {r.value for r in UserRole if r != UserRole.SUPER_ADMIN}
+
+    created, errors, seen_emails = 0, [], set()
+    for i, row in enumerate(rows, start=2):
+        if not any(str(v or "").strip() for v in row.values()):
+            continue
+        first, last = cell(row, "first_name", "First Name"), cell(row, "last_name", "Last Name")
+        if not first and not last:
+            full = cell(row, "name", "full_name")
+            first, _, last = full.partition(" ")
+        email = cell(row, "email", "Email Address")
+        if not first or not email:
+            errors.append(f"Row {i}: first name and email are required")
+            continue
+        last = last or "-"
+        try:
+            email = str(email_adapter.validate_python(email))
+        except Exception:
+            errors.append(f"Row {i}: '{email}' is not a valid email")
+            continue
+        if email.lower() in seen_emails:
+            errors.append(f"Row {i}: {email} appears more than once in the file")
+            continue
+        role = (cell(row, "role") or "employee").lower().replace(" ", "_")
+        if role not in allowed_roles:
+            errors.append(f"Row {i}: unknown role '{role}'")
+            continue
+        group_name = cell(row, "group", "group_name")
+        if group_name and group_name.lower() not in group_map:
+            errors.append(f"Row {i}: group '{group_name}' not found")
+            continue
+        try:
+            await _insert_employee(
+                email=email, first_name=first, last_name=last, employee_id=cell(row, "employee_id", "Employee ID"),
+                role=UserRole(role), tenant_id=target_tenant,
+                group_id=group_map.get(group_name.lower()) if group_name else None,
+                password=cell(row, "password") or None,
+            )
+            seen_emails.add(email.lower())
+            created += 1
+        except HTTPException as e:
+            errors.append(f"Row {i} ({email}): {e.detail}")
+    await write_audit_log(current_user.id, "bulk_create", "user", "import", f"Imported {created} employees", tenant_id=target_tenant)
+    return {"created": created, "skipped": len(errors), "errors": errors}
+
+async def _get_manageable_user(user_id: str, current_user: User) -> dict:
+    """Load a user the caller may manage passwords for (404 rather than 403 across tenants)."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if current_user.role == UserRole.TENANT_ADMIN:
+        if target.get("tenant_id") != current_user.tenant_id:
+            raise HTTPException(status_code=404, detail="User not found")
+        if target["role"] in ["tenant_admin", "super_admin"] and target["id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Cannot manage passwords of admin accounts")
+    return target
+
+@api_router.put("/users/{user_id}/password")
+async def admin_set_password(user_id: str, data: AdminSetPassword, current_user: User = Depends(get_current_user)):
+    """Admin sets or replaces an employee's password (also used to give a password-less employee their first one)."""
+    target = await _get_manageable_user(user_id, current_user)
+    validate_password_strength(data.new_password)
+    await db.users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(data.new_password)}})
+    await write_audit_log(current_user.id, "change_password", "user", user_id, f"Password set for {target['email']}", tenant_id=target.get("tenant_id"))
+    return {"message": "Password updated"}
+
+@api_router.post("/users/{user_id}/password-reset-link")
+async def admin_send_reset_link(user_id: str, current_user: User = Depends(get_current_user)):
+    """Email the employee a one-hour reset link; the link is also returned so the admin can share it by hand."""
+    target = await _get_manageable_user(user_id, current_user)
+    reset_token = str(uuid.uuid4())
+    await db.password_resets.insert_one({
+        "token": reset_token,
+        "user_id": target["id"],
+        "email": target["email"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "used": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    email_sent = await send_reset_email(to_email=target["email"], reset_token=reset_token, user_name=target.get("name", ""))
+    await write_audit_log(current_user.id, "update", "user", user_id, f"Password reset link sent to {target['email']}", tenant_id=target.get("tenant_id"))
+    return {
+        "message": "Reset link emailed" if email_sent else "Email could not be sent. Share the link manually.",
+        "email_sent": email_sent,
+        "reset_link": f"{FRONTEND_URL}/reset-password?token={reset_token}",
+    }
 
 @api_router.delete("/users/{user_id}")
 async def delete_user(user_id: str, current_user: User = Depends(get_current_user)):
@@ -6594,12 +6822,14 @@ async def accept_invite(token: str, accept_data: InviteAccept):
     user = User(
         email=invite["email"],
         name=accept_data.name,
-        hashed_password=hashed,
         role=invite["role"],
         tenant_id=invite.get("tenant_id"),
         status="active"
     )
-    await db.users.insert_one(user.model_dump())
+    # User ignores unknown fields, so the hash must be added to the stored document explicitly
+    doc = user.model_dump()
+    doc["password_hash"] = hashed
+    await db.users.insert_one(doc)
     await db.invite_tokens.update_one({"token": token}, {"$set": {"accepted": True}})
     return {"message": "Account created successfully. You can now log in."}
 

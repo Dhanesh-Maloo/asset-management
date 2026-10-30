@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package, KeyRound, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmployeeAssetsDialog } from '../components/EmployeeAssetsDialog';
 
@@ -34,6 +34,18 @@ const Users = () => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [assetCounts, setAssetCounts] = useState({});
   const [assetsFor, setAssetsFor] = useState(null);
+
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importTenantId, setImportTenantId] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+
+  const [passwordFor, setPasswordFor] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [resetLink, setResetLink] = useState('');
 
   const [formData, setFormData] = useState({
     email: '',
@@ -92,9 +104,12 @@ const Users = () => {
         ...formData,
         tenant_id: user.role === 'super_admin' ? formData.tenant_id : user.tenant_id,
         group_id: formData.group_id || null,
+        password: formData.password || null,
       };
-      await axios.post(`${API}/auth/register`, payload);
-      toast.success('Employee added successfully');
+      const res = await axios.post(`${API}/users`, payload);
+      toast.success(res.data.has_password
+        ? 'Employee added successfully'
+        : 'Employee added without a password. Use the Password button to set one or send a reset link.');
       setDialogOpen(false);
       setFormData({ email: '', password: '', first_name: '', last_name: '', employee_id: '', role: 'employee', tenant_id: '', group_id: '' });
       fetchData();
@@ -120,6 +135,89 @@ const Users = () => {
     } finally {
       setInviteSending(false);
     }
+  };
+
+  const handleImport = async () => {
+    if (!importFile) { toast.error('Please select a file'); return; }
+    if (user.role === 'super_admin' && !importTenantId) { toast.error('Please select a tenant'); return; }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const body = new FormData();
+      body.append('file', importFile);
+      const res = await axios.post(`${API}/users/import`, body, {
+        params: user.role === 'super_admin' ? { tenant_id: importTenantId } : undefined,
+      });
+      setImportResult(res.data);
+      if (res.data.created > 0) toast.success(`${res.data.created} employee(s) imported`);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const downloadImportTemplate = async () => {
+    try {
+      const res = await axios.get(`${API}/users/import/template`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = 'employee_import_template.csv'; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const openPasswordDialog = (u) => {
+    setPasswordFor(u);
+    setNewPassword('');
+    setConfirmPassword('');
+    setResetLink('');
+  };
+
+  const closePasswordDialog = () => {
+    setPasswordFor(null);
+    setNewPassword('');
+    setConfirmPassword('');
+    setResetLink('');
+  };
+
+  const handleSetPassword = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return; }
+    setPasswordSaving(true);
+    try {
+      await axios.put(`${API}/users/${passwordFor.id}/password`, { new_password: newPassword });
+      toast.success(`Password updated for ${passwordFor.name}`);
+      closePasswordDialog();
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update password');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const handleSendResetLink = async () => {
+    setPasswordSaving(true);
+    try {
+      const res = await axios.post(`${API}/users/${passwordFor.id}/password-reset-link`);
+      setResetLink(res.data.reset_link);
+      if (res.data.email_sent) toast.success('Reset link emailed');
+      else toast.warning('Email could not be sent. Share the link manually.');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create reset link');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const canManagePassword = (u) => {
+    if (user.role === 'super_admin') return true;
+    if (user.role !== 'tenant_admin') return false;
+    return u.id === user.id || (u.role !== 'tenant_admin' && u.role !== 'super_admin');
   };
 
   const copyInviteLink = () => {
@@ -178,6 +276,10 @@ const Users = () => {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setImportFile(null); setImportResult(null); setImportDialogOpen(true); }} data-testid="import-users-btn">
+              <Upload className="h-4 w-4 mr-2" />
+              Import Employees
+            </Button>
             <Button variant="outline" onClick={() => { setInviteForm({ email: '', role: 'employee' }); setInviteResult(null); setInviteDialogOpen(true); }}>
               <Mail className="h-4 w-4 mr-2" />
               Invite Employee
@@ -244,11 +346,22 @@ const Users = () => {
                             <span className="h-1.5 w-1.5 rounded-full bg-current" />
                             {u.status}
                           </Badge>
+                          {!u.has_password && (
+                            <Badge variant="outline" className="ml-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 font-medium">
+                              No password
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(u.created_at).toLocaleDateString()}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {canManagePassword(u) && (
+                            <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => openPasswordDialog(u)} data-testid={`password-btn-${u.id}`}>
+                              <KeyRound className="h-3.5 w-3.5 mr-1.5" />
+                              Password
+                            </Button>
+                          )}
                           {canDeleteUser(u) && (
                             <Button size="sm" variant="ghost" className="h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => openDeleteUser(u)} data-testid={`delete-user-btn-${u.id}`}>
                               <Trash2 className="h-3.5 w-3.5 mr-1.5" />
@@ -374,6 +487,105 @@ const Users = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Import Employees Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="max-w-md" data-testid="import-users-dialog">
+          <DialogHeader>
+            <DialogTitle>Import Employees</DialogTitle>
+            <DialogDescription>Upload a CSV or Excel file to add many employees at once</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <button type="button" onClick={downloadImportTemplate} className="text-sm text-primary underline hover:no-underline">
+              Download CSV Template
+            </button>
+            <p className="text-xs text-muted-foreground">
+              Columns: first_name, last_name, email (required); employee_id, role, group, password (optional).
+              Rows without a password are created without one; send them a reset link afterwards.
+            </p>
+            {user.role === 'super_admin' && (
+              <div>
+                <Label>Tenant</Label>
+                <Select value={importTenantId} onValueChange={setImportTenantId}>
+                  <SelectTrigger><SelectValue placeholder="Select tenant" /></SelectTrigger>
+                  <SelectContent>
+                    {tenants.map(t => (<SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div>
+              <Label>Select File (.csv or .xlsx)</Label>
+              <input
+                type="file"
+                accept=".csv,.xlsx"
+                className="mt-1 block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-white hover:file:bg-primary/90"
+                onChange={(e) => { setImportFile(e.target.files[0] || null); setImportResult(null); }}
+                data-testid="import-users-file"
+              />
+            </div>
+            {importResult && (
+              <div className={`p-3 rounded-lg text-sm ${importResult.created > 0 ? 'bg-green-50 border border-green-200' : 'bg-slate-50 border border-slate-200'}`}>
+                <p className="font-semibold text-green-700">{importResult.created} employee(s) imported</p>
+                {importResult.skipped > 0 && <p className="text-slate-600 mt-1">{importResult.skipped} row(s) skipped</p>}
+                {importResult.errors?.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 max-h-40 overflow-y-auto">
+                    {importResult.errors.map((err, i) => (<li key={i} className="text-xs text-red-600">{err}</li>))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>Close</Button>
+            <Button onClick={handleImport} disabled={importing || !importFile} data-testid="import-users-submit">
+              {importing ? 'Importing...' : 'Import'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Password Dialog */}
+      <Dialog open={!!passwordFor} onOpenChange={(open) => { if (!open) closePasswordDialog(); }}>
+        <DialogContent className="max-w-md" data-testid="password-dialog">
+          <DialogHeader>
+            <DialogTitle>Manage Password</DialogTitle>
+            <DialogDescription>
+              {passwordFor?.name} ({passwordFor?.email}){passwordFor && !passwordFor.has_password ? ' has no password yet' : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSetPassword} className="space-y-4">
+            <div>
+              <Label htmlFor="new-password">{passwordFor?.has_password ? 'New Password' : 'Set Password'}</Label>
+              <Input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" required data-testid="new-password-input" />
+              <p className="text-xs text-muted-foreground mt-1">Min 12 characters with upper, lower and a number.</p>
+            </div>
+            <div>
+              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <Input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" required data-testid="confirm-password-input" />
+            </div>
+            <Button type="submit" disabled={passwordSaving || !newPassword} className="w-full" data-testid="save-password-btn">
+              <KeyRound className="h-4 w-4 mr-2" />
+              {passwordSaving ? 'Saving...' : 'Save Password'}
+            </Button>
+          </form>
+          <div className="border-t pt-4 space-y-3">
+            <p className="text-sm text-muted-foreground">Or let the employee choose their own password:</p>
+            <Button type="button" variant="outline" className="w-full" onClick={handleSendResetLink} disabled={passwordSaving} data-testid="send-reset-link-btn">
+              <Mail className="h-4 w-4 mr-2" />
+              Send Reset Link
+            </Button>
+            {resetLink && (
+              <div className="flex gap-2">
+                <input readOnly value={resetLink} className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs bg-muted/50 font-mono truncate" />
+                <Button size="sm" variant="outline" type="button" onClick={() => { navigator.clipboard.writeText(resetLink); toast.success('Link copied to clipboard'); }}>
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Create User Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="create-user-dialog">
@@ -429,15 +641,18 @@ const Users = () => {
               />
             </div>
             <div>
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Password (Optional)</Label>
               <Input
                 id="password"
                 type="password"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                required
+                autoComplete="new-password"
                 data-testid="user-password-input"
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                Leave blank to set it later. Min 12 characters with upper, lower and a number.
+              </p>
             </div>
             <div>
               <Label htmlFor="role">Role</Label>
