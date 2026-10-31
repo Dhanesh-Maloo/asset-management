@@ -504,6 +504,7 @@ const Assets = () => {
         notes: bulkDispatchNotes
       });
       toast.success(`${res.data.dispatched} unit(s) dispatched from store`);
+      if (res.data.skipped?.length) toast.warning(`Skipped (no longer in store): ${res.data.skipped.join(', ')}`);
       setSelectedIds([]);
       setBulkDispatchOpen(false);
       setBulkDispatchUserId('');

@@ -36,6 +36,8 @@ const Orders = () => {
   const [selectedUnitId, setSelectedUnitId] = useState('');
   const [dispatching, setDispatching] = useState(false);
   const [loadingUnits, setLoadingUnits] = useState(false);
+  const [dispatchLocation, setDispatchLocation] = useState('');
+  const [locationOptions, setLocationOptions] = useState([]);
 
   useEffect(() => {
     fetchData();
@@ -115,11 +117,16 @@ const Orders = () => {
   const openDispatchDialog = async (order) => {
     setDispatchOrder(order);
     setSelectedUnitId('');
+    setDispatchLocation('');
     setDispatchDialogOpen(true);
     setLoadingUnits(true);
     try {
-      const res = await axios.get(`${API}/orders/${order.id}/available-units`);
+      const [res, locRes] = await Promise.all([
+        axios.get(`${API}/orders/${order.id}/available-units`),
+        axios.get(`${API}/locations`).catch(() => ({ data: [] }))
+      ]);
       setAvailableUnits(res.data);
+      setLocationOptions(locRes.data.map((l) => l.name).filter(Boolean));
     } catch (error) {
       toast.error('Failed to load available units in store');
       setAvailableUnits([]);
@@ -130,12 +137,17 @@ const Orders = () => {
 
   const handleDispatch = async () => {
     if (!dispatchOrder) return;
+    if (!dispatchLocation.trim()) {
+      toast.error('Enter where this unit is being dispatched to');
+      return;
+    }
     setDispatching(true);
     try {
       await axios.post(`${API}/orders/${dispatchOrder.id}/dispatch`, {
-        asset_id: selectedUnitId || null
+        asset_id: selectedUnitId || null,
+        location: dispatchLocation.trim()
       });
-      toast.success('Unit dispatched from store');
+      toast.success(`Unit dispatched to ${dispatchLocation.trim()}`);
       setDispatchDialogOpen(false);
       setDispatchOrder(null);
       fetchData();
@@ -411,7 +423,19 @@ const Orders = () => {
                         {user.role !== 'employee' && (
                           <TableCell>{users[order.user_id]?.name || 'Unknown User'}</TableCell>
                         )}
-                        <TableCell>{getApprovalStageBadge(order)}</TableCell>
+                        <TableCell>
+                          {getApprovalStageBadge(order)}
+                          {order.status === 'fulfilled' && (order.dispatched_location || order.dispatched_asset_tag) && (
+                            <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1" data-testid={`dispatch-info-${order.id}`}>
+                              <Truck className="h-3 w-3 shrink-0" />
+                              <span>
+                                {order.dispatched_asset_tag && <strong>{order.dispatched_asset_tag}</strong>}
+                                {order.dispatched_location && <> sent to {order.dispatched_location}</>}
+                                {order.dispatched_at && <> on {new Date(order.dispatched_at).toLocaleDateString()}</>}
+                              </span>
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(order.created_at).toLocaleDateString()}
                         </TableCell>
@@ -509,15 +533,40 @@ const Orders = () => {
                 </p>
               </div>
             )}
+            {!loadingUnits && availableUnits.length > 0 && (
+              <div>
+                <Label htmlFor="dispatch_location">Dispatch to (location / address) *</Label>
+                <Input
+                  id="dispatch_location"
+                  list="dispatch-location-options"
+                  value={dispatchLocation}
+                  onChange={(e) => setDispatchLocation(e.target.value)}
+                  placeholder="e.g. Head Office, 3rd Floor"
+                  maxLength={300}
+                  data-testid="dispatch-location-input"
+                />
+                <datalist id="dispatch-location-options">
+                  {locationOptions.map((name) => <option key={name} value={name} />)}
+                </datalist>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Pick a saved location or type an address. The unit's location is updated to this.
+                </p>
+                {dispatchOrder?.delivery_notes && (
+                  <p className="text-xs mt-2 rounded-md bg-muted px-2 py-1.5">
+                    Requester's delivery notes: {dispatchOrder.delivery_notes}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDispatchDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={handleDispatch}
-              disabled={dispatching || loadingUnits || availableUnits.length === 0}
+              disabled={dispatching || loadingUnits || availableUnits.length === 0 || !dispatchLocation.trim()}
               data-testid="confirm-dispatch-btn"
             >
-              {dispatching ? 'Dispatching...' : 'Confirm Dispatch'}
+              {dispatching ? 'Dispatching...' : dispatchLocation.trim() ? `Dispatch to ${dispatchLocation.trim()}` : 'Confirm Dispatch'}
             </Button>
           </DialogFooter>
         </DialogContent>

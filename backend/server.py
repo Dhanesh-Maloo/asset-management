@@ -371,8 +371,10 @@ class Order(BaseModel):
     approval_date: Optional[str] = None
     rejection_reason: str = ""
     dispatched_asset_id: Optional[str] = None
+    dispatched_asset_tag: Optional[str] = None
     dispatched_at: Optional[str] = None
     dispatched_by: Optional[str] = None
+    dispatched_location: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class OrderCreate(BaseModel):
@@ -385,6 +387,7 @@ class OrderUpdate(BaseModel):
 
 class OrderDispatch(BaseModel):
     asset_id: Optional[str] = None
+    location: str = Field("", max_length=300)  # where the unit is being sent (location name or address)
 
 class Asset(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -3714,15 +3717,20 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
         "is_deleted": {"$ne": True}
     }
 
+    destination = dispatch.location.strip()
+    claim_fields = {
+        "assigned_to": order["user_id"],
+        "assigned_date": datetime.now(timezone.utc).isoformat(),
+        "status": AssetStatus.ASSIGNED
+    }
+    if destination:
+        claim_fields["location"] = destination  # the unit now lives at the dispatch destination
+
     if dispatch.asset_id:
         # Atomically claim the requested unit — fails if another dispatch beat us to it
         asset = await db.assets.find_one_and_update(
             {**base_filter, "id": dispatch.asset_id},
-            {"$set": {
-                "assigned_to": order["user_id"],
-                "assigned_date": datetime.now(timezone.utc).isoformat(),
-                "status": AssetStatus.ASSIGNED
-            }},
+            {"$set": claim_fields},
             return_document=True,
             projection={"_id": 0}
         )
@@ -3735,11 +3743,7 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
             raise HTTPException(status_code=409, detail="No available units in store for this product")
         asset = await db.assets.find_one_and_update(
             {**base_filter, "id": candidate["id"]},
-            {"$set": {
-                "assigned_to": order["user_id"],
-                "assigned_date": datetime.now(timezone.utc).isoformat(),
-                "status": AssetStatus.ASSIGNED
-            }},
+            {"$set": claim_fields},
             return_document=True,
             projection={"_id": 0}
         )
@@ -3749,15 +3753,17 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
     recipient_name = (await _user_names([order["user_id"]])).get(order["user_id"], order["user_id"])
     await _record_history(
         asset["id"], "dispatched", current_user.id,
-        f"Dispatched from store to {recipient_name} against Order {order_id[:8]}",
+        f"Dispatched from store to {recipient_name} against Order {order_id[:8]}" + (f" — destination: {destination}" if destination else ""),
         to_user_id=order["user_id"],
     )
 
     update_data = {
         "status": OrderStatus.FULFILLED,
         "dispatched_asset_id": asset["id"],
+        "dispatched_asset_tag": asset.get("asset_tag"),
         "dispatched_at": datetime.now(timezone.utc).isoformat(),
-        "dispatched_by": current_user.id
+        "dispatched_by": current_user.id,
+        "dispatched_location": destination or None
     }
     await db.orders.update_one({"id": order_id}, {"$set": update_data})
 
@@ -3768,7 +3774,8 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
         await send_alert_email(
             recipient["email"],
             f"📦 {product_name} Dispatched",
-            [f"Unit {asset.get('asset_tag', asset['id'][:8])} (S/N: {asset.get('serial_number', 'N/A')}) has been dispatched to you."],
+            [f"Unit {asset.get('asset_tag', asset['id'][:8])} (S/N: {asset.get('serial_number', 'N/A')}) has been dispatched to you."]
+            + ([f"Destination: {destination}"] if destination else []),
             "Your order has been fulfilled and dispatched from store:"
         )
 
@@ -5625,35 +5632,43 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
     if not_available:
         raise HTTPException(status_code=409, detail=f"Not in store (already dispatched/unavailable): {', '.join(not_available)}")
 
-    recipient = await db.users.find_one({"id": body.assigned_to}, {"_id": 0, "email": 1, "name": 1})
-    if not recipient:
+    recipient = await db.users.find_one({"id": body.assigned_to}, {"_id": 0, "email": 1, "name": 1, "tenant_id": 1})
+    # The recipient must belong to the same tenant as the assets, otherwise a unit could be handed to another tenant's user.
+    if not recipient or any(a.get("tenant_id") != recipient.get("tenant_id") for a in assets):
         raise HTTPException(status_code=404, detail="Recipient user not found")
 
     now = datetime.now(timezone.utc).isoformat()
-    result = await db.assets.update_many(
-        {"id": {"$in": body.ids}},
+    # Re-check availability in the write itself so two simultaneous dispatches cannot both claim a unit.
+    await db.assets.update_many(
+        {"id": {"$in": body.ids}, "status": AssetStatus.AVAILABLE, "is_deleted": {"$ne": True}},
         {"$set": {"assigned_to": body.assigned_to, "assigned_date": now, "status": AssetStatus.ASSIGNED}}
     )
+    claimed_ids = {a["id"] async for a in db.assets.find(
+        {"id": {"$in": body.ids}, "assigned_to": body.assigned_to, "assigned_date": now}, {"_id": 0, "id": 1})}
+    dispatched = [a for a in assets if a["id"] in claimed_ids]
+    skipped = [a["asset_tag"] for a in assets if a["id"] not in claimed_ids]
+    if not dispatched:
+        raise HTTPException(status_code=409, detail=f"Not in store (already dispatched/unavailable): {', '.join(skipped)}")
 
     history_note = f"Dispatched from store to {recipient.get('name', body.assigned_to)}" + (f" — {body.notes}" if body.notes else "")
     recipient_name = recipient.get("name") or recipient.get("email") or body.assigned_to
     await db.asset_history.insert_many([
         AssetHistory(asset_id=a["id"], action="dispatched", performed_by=current_user.id, notes=history_note,
                      to_user_id=body.assigned_to, to_user_name=recipient_name).model_dump()
-        for a in assets
+        for a in dispatched
     ])
-    await write_audit_log(current_user.id, "bulk_dispatch", "assets", ",".join(body.ids), f"{result.modified_count} assets dispatched to {body.assigned_to}", tenant_id=current_user.tenant_id)
+    await write_audit_log(current_user.id, "bulk_dispatch", "assets", ",".join(a["id"] for a in dispatched), f"{len(dispatched)} assets dispatched to {body.assigned_to}", tenant_id=current_user.tenant_id)
 
     if recipient.get("email"):
-        tags = ", ".join(a["asset_tag"] for a in assets)
+        tags = ", ".join(a["asset_tag"] for a in dispatched)
         await send_alert_email(
             recipient["email"],
             "📦 Assets Dispatched to You",
-            [f"{result.modified_count} unit(s) dispatched: {tags}"],
+            [f"{len(dispatched)} unit(s) dispatched: {tags}"],
             "The following assets have been dispatched to you from store:"
         )
 
-    return {"dispatched": result.modified_count}
+    return {"dispatched": len(dispatched), "skipped": skipped}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ASSET PHOTO UPLOAD
