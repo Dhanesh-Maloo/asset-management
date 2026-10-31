@@ -93,7 +93,7 @@ const OnboardingModal = () => {
                 className={`flex items-start gap-4 p-4 rounded-xl border transition-all ${done ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-white border-slate-200 hover:border-primary/40 hover:shadow-sm'}`}
               >
                 <div className={`p-2.5 rounded-lg flex-shrink-0 ${step.color}`}>
-                  {done ? <CheckCircle2 className="h-5 w-5 text-green-600" /> : <Icon className="h-5 w-5" />}
+                  {done ? <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" /> : <Icon className="h-5 w-5" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className={`font-semibold text-sm ${done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{step.title}</p>

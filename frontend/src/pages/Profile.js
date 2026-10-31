@@ -182,7 +182,7 @@ const Profile = () => {
         {/* Stats Row */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <Card className="text-center p-4">
-            <div className="text-2xl font-bold text-blue-600">{profile?.assigned_assets?.length || 0}</div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{profile?.assigned_assets?.length || 0}</div>
             <div className="text-sm text-slate-500 flex items-center justify-center gap-1 mt-1"><Laptop className="h-3.5 w-3.5" /> Assets</div>
           </Card>
           <Card className="text-center p-4">
@@ -349,7 +349,7 @@ const Profile = () => {
                         <Copy className="h-4 w-4" />
                       </button>
                     </div>
-                    <button onClick={() => setNewlyCreatedKey(null)} className="text-xs text-green-700 mt-2 underline">Dismiss</button>
+                    <button onClick={() => setNewlyCreatedKey(null)} className="text-xs text-green-700 dark:text-green-400 mt-2 underline">Dismiss</button>
                   </div>
                 )}
               </CardContent>

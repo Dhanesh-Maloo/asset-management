@@ -148,7 +148,7 @@ const Licenses = () => {
           {canEdit && (
             <div className="flex gap-2">
               <button onClick={loadDemoData} disabled={seedingDemo}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 text-sm">
+                className="flex items-center gap-2 px-4 py-2 bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors disabled:opacity-50 text-sm">
                 <Sparkles className="h-4 w-4" />
                 {seedingDemo ? 'Loading...' : 'Load Demo Data'}
               </button>
@@ -173,7 +173,7 @@ const Licenses = () => {
             { label: 'Total Licenses', value: stats.total, color: 'text-primary' },
             { label: 'Expiring Soon', value: stats.expiringSoon, color: 'text-yellow-500' },
             { label: 'Expired', value: stats.expired, color: 'text-red-500' },
-            { label: 'Total Seats', value: stats.totalSeats, color: 'text-blue-600' },
+            { label: 'Total Seats', value: stats.totalSeats, color: 'text-blue-600 dark:text-blue-400' },
             { label: 'Used Seats', value: stats.usedSeats, color: 'text-emerald-600 dark:text-emerald-400' },
           ].map(s => (
             <Card key={s.label} className="p-4 text-center">
@@ -228,7 +228,7 @@ const Licenses = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className={`text-xs ${lic.over_used ? 'font-semibold text-red-600' : ''}`}>{lic.seats_used}/{lic.seats_total}</div>
+                          <div className={`text-xs ${lic.over_used ? 'font-semibold text-red-600 dark:text-red-400' : ''}`}>{lic.seats_used}/{lic.seats_total}</div>
                           {lic.over_used && (
                             <span className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-700 dark:text-red-400" data-testid="license-over-badge">
                               +{lic.seats_over} over
@@ -243,7 +243,7 @@ const Licenses = () => {
                         {lic.expiry_date ? (
                           <div className="flex items-center gap-1">
                             {(expired || expiring) && <AlertTriangle className={`h-3.5 w-3.5 ${expired ? 'text-red-500' : 'text-yellow-500'}`} />}
-                            <span className={expired ? 'text-red-600' : expiring ? 'text-yellow-600' : 'text-slate-600'}>
+                            <span className={expired ? 'text-red-600 dark:text-red-400' : expiring ? 'text-yellow-600 dark:text-yellow-400' : 'text-slate-600'}>
                               {new Date(lic.expiry_date).toLocaleDateString()}
                             </span>
                           </div>

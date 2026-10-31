@@ -122,7 +122,7 @@ const Locations = () => {
             <div className="text-xs text-slate-500 mt-1">Total Locations</div>
           </Card>
           <Card className="p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600">{[...new Set(locations.map(l => l.building).filter(Boolean))].length}</div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{[...new Set(locations.map(l => l.building).filter(Boolean))].length}</div>
             <div className="text-xs text-slate-500 mt-1">Buildings</div>
           </Card>
           <Card className="p-4 text-center">

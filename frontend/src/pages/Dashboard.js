@@ -359,7 +359,7 @@ const Dashboard = () => {
                 ].filter(t => user?.role !== 'helpdesk_agent' || t.link === '/tickets').map(t => (
                   <button key={t.label} onClick={() => navigate(t.link)}
                     className="text-left rounded-lg border border-border px-3 py-2.5 hover:bg-muted/50 transition-colors">
-                    <div className={`text-2xl font-bold ${t.value > 0 ? (t.bad ? 'text-red-600' : 'text-amber-600') : 'text-muted-foreground'}`}>{t.value}</div>
+                    <div className={`text-2xl font-bold ${t.value > 0 ? (t.bad ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400') : 'text-muted-foreground'}`}>{t.value}</div>
                     <div className="text-xs text-muted-foreground">{t.label}</div>
                   </button>
                 ))}
@@ -371,7 +371,7 @@ const Dashboard = () => {
                       className="w-full flex items-center gap-3 text-left text-sm rounded-md px-2 py-1.5 hover:bg-muted/50">
                       <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
                       <span className="flex-1 truncate">{item.title}</span>
-                      <span className={`text-xs font-medium ${item.days_left < 0 ? 'text-red-600' : item.days_left <= 7 ? 'text-red-600' : 'text-amber-600'}`}>
+                      <span className={`text-xs font-medium ${item.days_left < 0 ? 'text-red-600 dark:text-red-400' : item.days_left <= 7 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
                         {item.days_left < 0 ? `expired ${-item.days_left}d ago` : `${item.days_left}d left`}
                       </span>
                     </button>
@@ -457,7 +457,7 @@ const Dashboard = () => {
                           {charts.asset_status.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                         </Pie>
                         <Tooltip contentStyle={chartTooltipStyle} />
-                        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} formatter={(v) => <span className="text-muted-foreground">{v}</span>} />
                       </PieChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -524,7 +524,7 @@ const Dashboard = () => {
                           {charts.ticket_status.map((_, i) => <Cell key={i} fill={TICKET_COLORS[i % TICKET_COLORS.length]} />)}
                         </Pie>
                         <Tooltip contentStyle={chartTooltipStyle} />
-                        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} formatter={(v) => <span className="text-muted-foreground">{v}</span>} />
                       </PieChart>
                     </ResponsiveContainer>
                   </CardContent>

@@ -105,7 +105,7 @@ const Vendors = () => {
           </Card>
           {CATEGORIES.slice(0, 3).map(cat => (
             <Card key={cat} className="p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600">{vendors.filter(v => v.category === cat).length}</div>
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{vendors.filter(v => v.category === cat).length}</div>
               <div className="text-xs text-slate-500 mt-1">{cat}</div>
             </Card>
           ))}

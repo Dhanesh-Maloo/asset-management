@@ -82,9 +82,9 @@ const Subscription = () => {
   };
 
   const getUsageColor = (percent) => {
-    if (percent >= 90) return 'text-red-600';
-    if (percent >= 70) return 'text-amber-600';
-    return 'text-emerald-600';
+    if (percent >= 90) return 'text-red-600 dark:text-red-400';
+    if (percent >= 70) return 'text-amber-600 dark:text-amber-400';
+    return 'text-emerald-600 dark:text-emerald-400';
   };
 
   const formatLimit = (val) => (val === -1 ? 'Unlimited' : val);

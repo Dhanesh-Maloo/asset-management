@@ -111,7 +111,7 @@ const ApprovalWorkflows = () => {
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
                 <div className="bg-blue-500/10 p-3 rounded-md">
-                  <UserCog className="h-6 w-6 text-blue-600" />
+                  <UserCog className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">Maker</CardTitle>

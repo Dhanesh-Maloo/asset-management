@@ -153,7 +153,7 @@ const InviteAccept = () => {
             </div>
 
             {submitError && (
-              <div className="bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3 text-sm text-red-700">
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3 text-sm text-red-700 dark:text-red-400">
                 {submitError}
               </div>
             )}

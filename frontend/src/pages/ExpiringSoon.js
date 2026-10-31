@@ -58,10 +58,10 @@ export const ExpiringSoon = () => {
   };
 
   const tiles = summary ? [
-    { label: 'Expired', value: summary.expired, tone: 'text-red-600' },
-    { label: 'Within 7 days', value: summary.within_7, tone: 'text-red-600' },
-    { label: 'Within 30 days', value: summary.within_30, tone: 'text-amber-600' },
-    { label: `Within ${days} days`, value: summary.within_60, tone: 'text-blue-600' },
+    { label: 'Expired', value: summary.expired, tone: 'text-red-600 dark:text-red-400' },
+    { label: 'Within 7 days', value: summary.within_7, tone: 'text-red-600 dark:text-red-400' },
+    { label: 'Within 30 days', value: summary.within_30, tone: 'text-amber-600 dark:text-amber-400' },
+    { label: `Within ${days} days`, value: summary.within_60, tone: 'text-blue-600 dark:text-blue-400' },
   ] : [];
 
   return (

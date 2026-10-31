@@ -225,7 +225,7 @@ export function LabelPhotoDialog({ open, onOpenChange, products, onApply }) {
             <Loader2 className="h-4 w-4 animate-spin" /> Reading text{stage ? ` (${stage})` : ''}… {progress > 0 ? `${progress}%` : '(first time downloads the reader, ~10 MB)'}
           </p>
         )}
-        {status === 'error' && <p className="text-sm text-orange-600 flex items-center gap-1"><AlertTriangle className="h-4 w-4" />{error}</p>}
+        {status === 'error' && <p className="text-sm text-orange-600 dark:text-orange-400 flex items-center gap-1"><AlertTriangle className="h-4 w-4" />{error}</p>}
 
         {status === 'done' && (
           <div className="space-y-3">
@@ -242,7 +242,7 @@ export function LabelPhotoDialog({ open, onOpenChange, products, onApply }) {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-orange-600 mt-1">No serial found. Check the text below or retake the photo.</p>
+                <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">No serial found. Check the text below or retake the photo.</p>
               )}
               <p className="text-xs text-muted-foreground mt-1">Check carefully: OCR can mix up O/0 and I/1.</p>
             </div>

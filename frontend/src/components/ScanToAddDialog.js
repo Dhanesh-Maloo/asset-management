@@ -194,10 +194,10 @@ export function ScanToAddDialog({ open, onOpenChange, products, existingSerials,
 
         {skipped.length > 0 && (
           <div className="rounded-md border border-orange-300 bg-orange-50 dark:bg-orange-950/20 p-3 text-sm">
-            <p className="font-medium text-orange-700 flex items-center gap-1 mb-1">
+            <p className="font-medium text-orange-700 dark:text-orange-400 flex items-center gap-1 mb-1">
               <AlertTriangle className="h-4 w-4" /> {skipped.length} not added
             </p>
-            <ul className="text-xs text-orange-700 space-y-0.5">
+            <ul className="text-xs text-orange-700 dark:text-orange-400 space-y-0.5">
               {skipped.map((s) => (<li key={s.serial_number}><span className="font-mono">{s.serial_number}</span> — {s.reason}</li>))}
             </ul>
           </div>

@@ -192,8 +192,8 @@ const Reports = () => {
                             <td className="py-2">{d.department}</td>
                             <td className="py-2 text-right font-medium">{d.asset_count}</td>
                             <td className="py-2 text-right">₹{d.total_value.toLocaleString()}</td>
-                            <td className="py-2 text-right text-green-700">₹{(d.current_value || 0).toLocaleString()}</td>
-                            <td className="py-2 text-right text-red-600">₹{(d.depreciation || 0).toLocaleString()}</td>
+                            <td className="py-2 text-right text-green-700 dark:text-green-400">₹{(d.current_value || 0).toLocaleString()}</td>
+                            <td className="py-2 text-right text-red-600 dark:text-red-400">₹{(d.depreciation || 0).toLocaleString()}</td>
                             <td className="py-2 text-right">₹{(d.amc_annual_cost || 0).toLocaleString()}</td>
                           </tr>
                         ))}</tbody>
@@ -201,8 +201,8 @@ const Reports = () => {
                           <td className="py-2">Total</td>
                           <td className="py-2 text-right">{data.reduce((s, d) => s + d.asset_count, 0)}</td>
                           <td className="py-2 text-right">₹{data.reduce((s, d) => s + d.total_value, 0).toLocaleString()}</td>
-                          <td className="py-2 text-right text-green-700">₹{data.reduce((s, d) => s + (d.current_value || 0), 0).toLocaleString()}</td>
-                          <td className="py-2 text-right text-red-600">₹{data.reduce((s, d) => s + (d.depreciation || 0), 0).toLocaleString()}</td>
+                          <td className="py-2 text-right text-green-700 dark:text-green-400">₹{data.reduce((s, d) => s + (d.current_value || 0), 0).toLocaleString()}</td>
+                          <td className="py-2 text-right text-red-600 dark:text-red-400">₹{data.reduce((s, d) => s + (d.depreciation || 0), 0).toLocaleString()}</td>
                           <td className="py-2 text-right">₹{data.reduce((s, d) => s + (d.amc_annual_cost || 0), 0).toLocaleString()}</td>
                         </tr></tfoot>
                       </table>
@@ -241,7 +241,7 @@ const Reports = () => {
                       ))}
                       <div className="flex items-center justify-between py-2 font-bold border-t-2">
                         <span>Total</span>
-                        <span className="text-green-700">₹{data.reduce((s, d) => s + (d.cost || 0), 0).toLocaleString()}</span>
+                        <span className="text-green-700 dark:text-green-400">₹{data.reduce((s, d) => s + (d.cost || 0), 0).toLocaleString()}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -308,8 +308,8 @@ const Reports = () => {
                             <td className="px-4 py-3 font-medium">{a.asset_tag}</td>
                             <td className="px-4 py-3 text-slate-600">{a.serial_number}</td>
                             <td className="px-4 py-3">₹{(a.purchase_price || 0).toLocaleString()}</td>
-                            <td className="px-4 py-3 font-medium text-green-700">₹{(a.current_value || 0).toLocaleString()}</td>
-                            <td className="px-4 py-3 text-red-600">₹{(a.depreciation || 0).toLocaleString()}</td>
+                            <td className="px-4 py-3 font-medium text-green-700 dark:text-green-400">₹{(a.current_value || 0).toLocaleString()}</td>
+                            <td className="px-4 py-3 text-red-600 dark:text-red-400">₹{(a.depreciation || 0).toLocaleString()}</td>
                             <td className="px-4 py-3">{a.years_old}</td>
                           </tr>
                         ))}
@@ -317,8 +317,8 @@ const Reports = () => {
                       <tfoot><tr className="font-bold border-t-2">
                         <td className="px-4 py-2" colSpan={2}>Total</td>
                         <td className="px-4 py-2">₹{data.reduce((s, a) => s + (a.purchase_price || 0), 0).toLocaleString()}</td>
-                        <td className="px-4 py-2 text-green-700">₹{data.reduce((s, a) => s + (a.current_value || 0), 0).toLocaleString()}</td>
-                        <td className="px-4 py-2 text-red-600">₹{data.reduce((s, a) => s + (a.depreciation || 0), 0).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-green-700 dark:text-green-400">₹{data.reduce((s, a) => s + (a.current_value || 0), 0).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-red-600 dark:text-red-400">₹{data.reduce((s, a) => s + (a.depreciation || 0), 0).toLocaleString()}</td>
                         <td></td>
                       </tr></tfoot>
                     </table>

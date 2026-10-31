@@ -864,7 +864,7 @@ const Assets = () => {
                   </Button>
                 </div>
                 {serialExists?.exists && (
-                  <p className="text-xs text-orange-600 flex items-center gap-1 mt-1">
+                  <p className="text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1 mt-1">
                     <AlertTriangle className="h-3 w-3" /> Duplicate: already used by <strong>{serialExists.asset_tag}</strong>
                   </p>
                 )}
@@ -944,7 +944,7 @@ const Assets = () => {
                     </SelectContent>
                   </Select>
                   {assetForm.is_demo && (
-                    <p className="text-xs text-amber-600 mt-1">This asset will be marked as a demo and visible in the Demo Assets filter.</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">This asset will be marked as a demo and visible in the Demo Assets filter.</p>
                   )}
                 </div>
                 <div>
@@ -1088,14 +1088,14 @@ const Assets = () => {
             </div>
             {importResult && (
               <div className={`p-3 rounded-lg text-sm ${importResult.created > 0 ? 'bg-green-50 border border-green-200' : 'bg-slate-50 border border-slate-200'}`}>
-                <p className="font-semibold text-green-700">{importResult.created} asset(s) imported successfully</p>
+                <p className="font-semibold text-green-700 dark:text-green-400">{importResult.created} asset(s) imported successfully</p>
                 {importResult.skipped > 0 && (
                   <p className="text-slate-600 mt-1">{importResult.skipped} row(s) skipped</p>
                 )}
                 {importResult.errors?.length > 0 && (
                   <ul className="mt-2 space-y-0.5">
                     {importResult.errors.slice(0, 5).map((e, i) => (
-                      <li key={i} className="text-xs text-red-600">{e}</li>
+                      <li key={i} className="text-xs text-red-600 dark:text-red-400">{e}</li>
                     ))}
                     {importResult.errors.length > 5 && <li className="text-xs text-slate-500">...and {importResult.errors.length - 5} more</li>}
                   </ul>

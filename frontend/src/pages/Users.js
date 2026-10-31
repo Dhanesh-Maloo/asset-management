@@ -525,16 +525,16 @@ const Users = () => {
             </div>
             {importResult && (
               <div className={`p-3 rounded-lg text-sm ${importResult.created > 0 ? 'bg-green-50 border border-green-200' : 'bg-slate-50 border border-slate-200'}`}>
-                <p className="font-semibold text-green-700">{importResult.created} employee(s) imported</p>
+                <p className="font-semibold text-green-700 dark:text-green-400">{importResult.created} employee(s) imported</p>
                 {importResult.skipped > 0 && <p className="text-slate-600 mt-1">{importResult.skipped} row(s) skipped</p>}
                 {importResult.errors?.length > 0 && (
                   <ul className="mt-2 space-y-0.5 max-h-40 overflow-y-auto">
-                    {importResult.errors.map((err, i) => (<li key={i} className="text-xs text-red-600">{err}</li>))}
+                    {importResult.errors.map((err, i) => (<li key={i} className="text-xs text-red-600 dark:text-red-400">{err}</li>))}
                   </ul>
                 )}
                 {importResult.warnings?.length > 0 && (
                   <ul className="mt-2 space-y-0.5 max-h-40 overflow-y-auto">
-                    {importResult.warnings.map((w, i) => (<li key={i} className="text-xs text-amber-700">{w}</li>))}
+                    {importResult.warnings.map((w, i) => (<li key={i} className="text-xs text-amber-700 dark:text-amber-400">{w}</li>))}
                   </ul>
                 )}
               </div>
@@ -715,7 +715,7 @@ const Users = () => {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent data-testid="delete-user-dialog">
           <DialogHeader>
-            <DialogTitle className="text-red-600">Delete Employee</DialogTitle>
+            <DialogTitle className="text-red-600 dark:text-red-400">Delete Employee</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete <span className="font-semibold">{userToDelete?.name}</span> ({userToDelete?.email})? This action cannot be undone.
             </DialogDescription>

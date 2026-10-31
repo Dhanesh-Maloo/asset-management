@@ -362,7 +362,7 @@ const TenantSettings = () => {
               <CardHeader>
                 <div className="flex items-center gap-3">
                   <div className="bg-blue-500/10 p-3 rounded-md">
-                    <Settings className="h-5 w-5 text-blue-600" />
+                    <Settings className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div>
                     <CardTitle>Enabled Features</CardTitle>
@@ -455,7 +455,7 @@ const TenantSettings = () => {
               <CardHeader>
                 <div className="flex items-center gap-3">
                   <div className="bg-amber-500/10 p-3 rounded-md">
-                    <Database className="h-5 w-5 text-amber-600" />
+                    <Database className="h-5 w-5 text-amber-600 dark:text-amber-400" />
                   </div>
                   <div>
                     <CardTitle>Demo Data</CardTitle>

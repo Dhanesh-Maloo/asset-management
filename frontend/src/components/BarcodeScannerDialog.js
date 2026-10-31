@@ -146,7 +146,7 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan, title = 'Scan
           <DialogDescription>Hold the phone 15–25 cm away and keep the barcode inside the box. Use the light or zoom if it won't read. Printed text without a barcode can't be scanned here — use the label photo option.</DialogDescription>
         </DialogHeader>
         <div id={READER_ID} className="w-full overflow-hidden rounded-md bg-black/5 min-h-[200px]" />
-        {error && <p className="text-sm text-orange-600">{error}</p>}
+        {error && <p className="text-sm text-orange-600 dark:text-orange-400">{error}</p>}
         {(torchSupported || zoomRange) && (
           <div className="flex items-center gap-3">
             {torchSupported && (

@@ -733,7 +733,7 @@ const AssetDetail = () => {
                           </div>
                           <div>
                             <p className="text-sm text-muted-foreground">Total Depreciation</p>
-                            <p className="text-red-600 font-semibold">-${depreciation.total_depreciation}</p>
+                            <p className="text-red-600 dark:text-red-400 font-semibold">-${depreciation.total_depreciation}</p>
                           </div>
                         </>
                       )}
@@ -875,7 +875,7 @@ const AssetDetail = () => {
               <CardHeader>
                 <div className="flex items-center gap-3">
                   <div className="bg-blue-500/10 p-3 rounded-md">
-                    <TrendingDown className="h-6 w-6 text-blue-600" />
+                    <TrendingDown className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div>
                     <CardTitle>Asset Depreciation</CardTitle>
@@ -907,7 +907,7 @@ const AssetDetail = () => {
                       <Card>
                         <CardContent className="pt-6">
                           <p className="text-sm text-muted-foreground mb-2">Depreciation</p>
-                          <p className="text-2xl font-bold font-heading text-red-600">-${depreciation.total_depreciation}</p>
+                          <p className="text-2xl font-bold font-heading text-red-600 dark:text-red-400">-${depreciation.total_depreciation}</p>
                         </CardContent>
                       </Card>
                     </div>
@@ -1115,7 +1115,7 @@ const AssetDetail = () => {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="bg-blue-500/10 p-3 rounded-md"><FileText className="h-6 w-6 text-blue-600" /></div>
+                    <div className="bg-blue-500/10 p-3 rounded-md"><FileText className="h-6 w-6 text-blue-600 dark:text-blue-400" /></div>
                     <div><CardTitle>Documents</CardTitle><CardDescription>Invoices, warranties, AMC contracts, insurance certificates</CardDescription></div>
                   </div>
                   {canManage && (
@@ -1342,8 +1342,8 @@ const AssetDetail = () => {
           {fineInfo ? (
             <div className="space-y-4">
               <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-center">
-                <p className="text-red-700 font-semibold text-lg">Asset Returned Late</p>
-                <p className="text-red-600 mt-1">{fineInfo.days} day(s) overdue</p>
+                <p className="text-red-700 dark:text-red-400 font-semibold text-lg">Asset Returned Late</p>
+                <p className="text-red-600 dark:text-red-400 mt-1">{fineInfo.days} day(s) overdue</p>
                 {fineInfo.fine > 0 && <p className="text-red-800 font-bold mt-2">Fine: ${fineInfo.fine.toFixed(2)}</p>}
               </div>
               <Button className="w-full" onClick={() => { setFineInfo(null); setReturnDialogOpen(false); setReturnNotes(''); setReturnCondition('good'); fetchAssetDetails(); }}>
@@ -1596,7 +1596,7 @@ const AssetDetail = () => {
               <Label>Notes / Reason</Label>
               <textarea value={disposeForm.disposal_notes} onChange={e => setDisposeForm({...disposeForm, disposal_notes: e.target.value})} rows={3} placeholder="Reason for disposal..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             </div>
-            <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg text-sm text-amber-700">
+            <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg text-sm text-amber-700 dark:text-amber-400">
               This asset will be marked as <strong>Disposed</strong>. The record will be kept for compliance and audit. This is different from deleting.
             </div>
           </div>

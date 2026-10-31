@@ -391,10 +391,10 @@ const Tenants = () => {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent data-testid="delete-tenant-dialog">
           <DialogHeader>
-            <DialogTitle className="text-red-600">Delete Tenant</DialogTitle>
+            <DialogTitle className="text-red-600 dark:text-red-400">Delete Tenant</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete <span className="font-semibold">{tenantToDelete?.name}</span>?
-              This will permanently delete the tenant and <span className="font-semibold text-red-600">all associated users, assets, tickets, and data</span>. This action cannot be undone.
+              This will permanently delete the tenant and <span className="font-semibold text-red-600 dark:text-red-400">all associated users, assets, tickets, and data</span>. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

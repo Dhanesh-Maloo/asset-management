@@ -125,7 +125,7 @@ const Departments = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           <Card>
             <CardContent className="pt-6 flex items-center gap-4">
-              <div className="bg-indigo-500/10 p-3 rounded-md"><Building2 className="h-6 w-6 text-indigo-600" /></div>
+              <div className="bg-indigo-500/10 p-3 rounded-md"><Building2 className="h-6 w-6 text-indigo-600 dark:text-indigo-400" /></div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Departments</p>
                 <p className="text-2xl font-bold">{departments.length}</p>
@@ -134,7 +134,7 @@ const Departments = () => {
           </Card>
           <Card>
             <CardContent className="pt-6 flex items-center gap-4">
-              <div className="bg-blue-500/10 p-3 rounded-md"><Laptop className="h-6 w-6 text-blue-600" /></div>
+              <div className="bg-blue-500/10 p-3 rounded-md"><Laptop className="h-6 w-6 text-blue-600 dark:text-blue-400" /></div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Assets Assigned</p>
                 <p className="text-2xl font-bold">{Object.values(stats).reduce((s, v) => s + (v.asset_count || 0), 0)}</p>
@@ -198,7 +198,7 @@ const Departments = () => {
                               {s.user_count ?? 0}
                             </span>
                           </TableCell>
-                          <TableCell className="font-medium text-green-700">
+                          <TableCell className="font-medium text-green-700 dark:text-green-400">
                             ${(s.total_asset_value || 0).toLocaleString()}
                           </TableCell>
                           {canManage && (
