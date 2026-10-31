@@ -10,9 +10,12 @@ import { useAuth } from '../contexts/AuthContext';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Every page mounts its own DashboardLayout, so keep the last list here to avoid the bell resetting on navigation.
+let notificationCache = [];
+
 const DashboardLayout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState(notificationCache);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -34,7 +37,9 @@ const DashboardLayout = ({ children }) => {
   useEffect(() => {
     if (user) fetchNotifications();
     const interval = setInterval(() => { if (user) fetchNotifications(); }, 60000);
-    return () => clearInterval(interval);
+    const onFocus = () => { if (user && document.visibilityState === 'visible') fetchNotifications(); };
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onFocus); };
   }, [user]);
 
   useEffect(() => {
@@ -65,6 +70,7 @@ const DashboardLayout = ({ children }) => {
   const fetchNotifications = async () => {
     try {
       const res = await axios.get(`${API}/notifications`);
+      notificationCache = res.data;
       setNotifications(res.data);
     } catch {
       // silently fail
@@ -73,19 +79,39 @@ const DashboardLayout = ({ children }) => {
 
   // Notifications are computed live on the server, so track "seen" state locally.
   // A notification counts as unread again only if its count changes.
-  const seenKey = `seenNotifications_${user?.id || user?.email || 'user'}`;
-  const [seen, setSeen] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(seenKey) || '{}'); } catch { return {}; }
-  });
+  // The key depends on the signed-in user, which is not known yet on a fresh page load,
+  // so the seen list is read in an effect once the user is available (reading it up front
+  // used the wrong key and the badge came back after every refresh).
+  const seenKey = `seenNotifications_${user?.id || user?.email}`;
+  const [seen, setSeen] = useState({});
+  const [seenLoaded, setSeenLoaded] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    try { setSeen(JSON.parse(localStorage.getItem(seenKey) || '{}')); } catch { setSeen({}); }
+    setSeenLoaded(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seenKey, !!user]);
   const notifKey = (n) => n.type;
-  const isUnread = (n) => seen[notifKey(n)] !== n.count;
+  const isUnread = (n) => seenLoaded && seen[notifKey(n)] !== n.count;
   const totalCount = notifications.filter(isUnread).reduce((sum, n) => sum + (n.count || 0), 0);
 
+  // What was unread at the moment the dropdown opened, so the list can still highlight it after it is marked seen.
+  const [newTypes, setNewTypes] = useState([]);
+  const newOnOpen = notifications.filter((n) => newTypes.includes(n.type)).reduce((sum, n) => sum + (n.count || 0), 0);
+  const toggleBell = () => {
+    if (!notifOpen) {
+      setNewTypes(notifications.filter(isUnread).map((n) => n.type));
+      markAllSeen();
+    }
+    setNotifOpen(!notifOpen);
+  };
+
   const markAllSeen = () => {
+    if (!user) return;
     const next = {};
     notifications.forEach(n => { next[notifKey(n)] = n.count; });
     setSeen(next);
-    localStorage.setItem(seenKey, JSON.stringify(next));
+    try { localStorage.setItem(seenKey, JSON.stringify(next)); } catch { /* storage unavailable */ }
   };
 
   const typeIcon = (type) => {
@@ -161,7 +187,7 @@ const DashboardLayout = ({ children }) => {
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>
               <button
-                onClick={() => { if (!notifOpen) markAllSeen(); setNotifOpen(!notifOpen); }}
+                onClick={toggleBell}
                 className="relative p-2 hover:bg-accent rounded-md transition-colors"
                 data-testid="notification-bell"
               >
@@ -177,9 +203,9 @@ const DashboardLayout = ({ children }) => {
                 <div className="absolute right-0 top-11 w-80 bg-popover border border-border rounded-lg shadow-dropdown z-50 overflow-hidden animate-fade-in">
                   <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                     <h3 className="font-semibold text-sm">Notifications</h3>
-                    {totalCount > 0 && (
+                    {newOnOpen > 0 && (
                       <span className="bg-destructive/10 text-destructive text-xs font-semibold px-2 py-0.5 rounded-full">
-                        {totalCount} new
+                        {newOnOpen} new
                       </span>
                     )}
                   </div>
@@ -193,17 +219,17 @@ const DashboardLayout = ({ children }) => {
                     ) : (
                       notifications.map((n, i) => (
                         <a
-                          key={i}
+                          key={n.type || i}
                           href={n.link || '#'}
-                          onClick={() => setNotifOpen(false)}
-                          className="flex items-start gap-3 px-4 py-3 hover:bg-accent transition-colors border-b border-border/50 last:border-0"
+                          onClick={(e) => { e.preventDefault(); setNotifOpen(false); if (n.link) navigate(n.link); }}
+                          className={`flex items-start gap-3 px-4 py-3 hover:bg-accent transition-colors border-b border-border/50 last:border-0 ${newTypes.includes(n.type) ? 'bg-primary/5' : ''}`}
                         >
                           <span className="text-lg mt-0.5">{typeIcon(n.type)}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium leading-snug">{n.message}</p>
                             <p className="text-xs text-muted-foreground mt-0.5 capitalize">{n.type.replace(/_/g, ' ')}</p>
                           </div>
-                          <span className="text-xs font-bold text-white bg-primary rounded-full px-2 py-0.5 mt-0.5">
+                          <span className={`text-xs font-bold rounded-full px-2 py-0.5 mt-0.5 ${newTypes.includes(n.type) ? 'text-white bg-primary' : 'text-muted-foreground bg-muted'}`}>
                             {n.count}
                           </span>
                         </a>

@@ -3969,12 +3969,12 @@ async def get_expiring_warranties(days: int = 30, current_user: User = Depends(g
     assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
     
     expiring = []
-    current_date = datetime.now(timezone.utc)
+    current_date = datetime.now(timezone.utc).date()
     threshold_date = current_date + timedelta(days=days)
-    
+
     for asset in assets:
-        if asset.get("warranty_end_date"):
-            warranty_end = datetime.fromisoformat(asset["warranty_end_date"].replace('Z', '+00:00'))
+        warranty_end = _to_date(asset.get("warranty_end_date"))
+        if warranty_end:
             if current_date <= warranty_end <= threshold_date:
                 days_remaining = (warranty_end - current_date).days
                 expiring.append({
@@ -4444,13 +4444,13 @@ async def get_notifications(current_user: User = Depends(get_current_user)):
         asset_query = {"is_deleted": {"$ne": True}}
         if tenant_id:
             asset_query["tenant_id"] = tenant_id
-        assets = await db.assets.find(asset_query, {"_id": 0, "warranty_end_date": 1}).to_list(1000)
-        now = datetime.now(timezone.utc)
-        threshold = now + timedelta(days=30)
+        assets = await db.assets.find(asset_query, {"_id": 0, "warranty_end_date": 1}).to_list(5000)
+        today = datetime.now(timezone.utc).date()
+        threshold = today + timedelta(days=30)
+        # _to_date copes with both full ISO datetimes and plain YYYY-MM-DD (the Edit form saves the latter)
         expiring = sum(
             1 for a in assets
-            if a.get("warranty_end_date") and
-            now <= datetime.fromisoformat(a["warranty_end_date"].replace("Z", "+00:00")) <= threshold
+            if (end := _to_date(a.get("warranty_end_date"))) and today <= end <= threshold
         )
         if expiring > 0:
             notifications.append({
@@ -4460,11 +4460,13 @@ async def get_notifications(current_user: User = Depends(get_current_user)):
                 "link": "/assets"
             })
 
-    # Overdue maintenance (correct collection)
-    maint_query = {"status": "overdue"}
-    if tenant_id:
-        maint_query["tenant_id"] = tenant_id
-    overdue = await db.maintenance_schedules.count_documents(maint_query)
+    # Overdue maintenance (admins/managers only; it is tenant-wide)
+    overdue = 0
+    if current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        maint_query = {"status": "overdue"}
+        if tenant_id:
+            maint_query["tenant_id"] = tenant_id
+        overdue = await db.maintenance_schedules.count_documents(maint_query)
     if overdue > 0:
         notifications.append({
             "type": "overdue_maintenance",
@@ -4513,12 +4515,12 @@ async def trigger_email_alerts(current_user: User = Depends(get_current_user)):
         asset_query["tenant_id"] = tenant_id
     assets = await db.assets.find(asset_query, {"_id": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
-    threshold = now + timedelta(days=30)
+    today = now.date()
+    threshold = today + timedelta(days=30)
     expiring_assets = [
         f"{a.get('asset_tag', 'Unknown')} — warranty ends {a['warranty_end_date'][:10]}"
         for a in assets
-        if a.get("warranty_end_date") and
-        now <= datetime.fromisoformat(a["warranty_end_date"].replace("Z", "+00:00")) <= threshold
+        if (end := _to_date(a.get("warranty_end_date"))) and today <= end <= threshold
     ]
     if expiring_assets:
         for email in admin_emails:
