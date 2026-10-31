@@ -24,6 +24,9 @@ import { MasterQRDialog } from '../components/MasterQRDialog';
 import { parseScannedValue } from '../lib/scanParse';
 import { toast } from 'sonner';
 
+// Same params as the Products page, so both pages share one cached product list
+const PRODUCTS_PARAMS = { limit: 500 };
+
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
@@ -74,9 +77,15 @@ const Assets = () => {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
 
+  // Lists that do not depend on the filters (departments, categories, users, tenants) load once, side by side,
+  // instead of being re-fetched one after another every time a filter or the search box changes.
+  useEffect(() => {
+    fetchLookups();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     fetchData();
-    fetchDepartments();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, statusFilter, demoFilter, departmentFilter, categoryFilter]);
 
@@ -91,7 +100,7 @@ const Assets = () => {
       if (categoryFilter) params.category = categoryFilter;
       const [assetsRes, productsRes] = await Promise.all([
         axios.get(`${API}/assets`, { params }),
-        axios.get(`${API}/products`)
+        cachedGet(axios, `${API}/products`, PRODUCTS_PARAMS, 60000)
       ]);
 
       setAssets(assetsRes.data);
@@ -99,32 +108,38 @@ const Assets = () => {
       const productsMap = {};
       productsRes.data.forEach(p => productsMap[p.id] = p);
       setProducts(productsMap);
-
-      if (user.role !== 'employee') {
-        try {
-          const usersRes = await axios.get(`${API}/users`);
-          setUsers(usersRes.data);
-        } catch {
-          // Users endpoint may not be accessible for all roles
-        }
-      }
-
-      if (user.role === 'super_admin') {
-        try {
-          const tenantsRes = await axios.get(`${API}/tenants`);
-          const tenantsMap = {};
-          tenantsRes.data.forEach(t => { tenantsMap[t.id] = t; });
-          setTenants(tenantsMap);
-        } catch {
-          // Tenants endpoint only accessible to super_admin
-        }
-      }
     } catch (error) {
       console.error('Failed to fetch data', error);
       toast.error('Failed to load assets');
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchLookups = async () => {
+    await Promise.all([
+      fetchDepartments(),
+      (async () => {
+        if (user.role === 'employee') return;
+        try {
+          const usersRes = await cachedGet(axios, `${API}/users`, {}, 60000);
+          setUsers(usersRes.data);
+        } catch {
+          // Users endpoint may not be accessible for all roles
+        }
+      })(),
+      (async () => {
+        if (user.role !== 'super_admin') return;
+        try {
+          const tenantsRes = await cachedGet(axios, `${API}/tenants`, {}, 60000);
+          const tenantsMap = {};
+          tenantsRes.data.forEach(t => { tenantsMap[t.id] = t; });
+          setTenants(tenantsMap);
+        } catch {
+          // Tenants endpoint only accessible to super_admin
+        }
+      })(),
+    ]);
   };
 
   const handleAssign = async () => {
@@ -174,14 +189,20 @@ const Assets = () => {
   };
 
   const fetchDepartments = async () => {
-    try {
-      const res = await cachedGet(axios, `${API}/departments`, {}, 120000);
-      setDepartments(res.data);
-    } catch { /* silently fail */ }
-    try {
-      const res = await axios.get(`${API}/product-categories`);
-      setCategoryOptions(res.data);
-    } catch { /* silently fail */ }
+    await Promise.all([
+      (async () => {
+        try {
+          const res = await cachedGet(axios, `${API}/departments`, {}, 120000);
+          setDepartments(res.data);
+        } catch { /* silently fail */ }
+      })(),
+      (async () => {
+        try {
+          const res = await cachedGet(axios, `${API}/product-categories`, {}, 120000);
+          setCategoryOptions(res.data);
+        } catch { /* silently fail */ }
+      })(),
+    ]);
   };
 
   const handleImport = async () => {
