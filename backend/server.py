@@ -3213,16 +3213,19 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     if current_user.role in [UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
         query["tenant_id"] = current_user.tenant_id
     
-    total_assets = await db.assets.count_documents(query)
-    assigned_assets = await db.assets.count_documents({**query, "status": AssetStatus.ASSIGNED})
-    available_assets = await db.assets.count_documents({**query, "status": AssetStatus.AVAILABLE})
+    # Independent counts run side by side: the call takes as long as the slowest one, not the sum of all of them.
     
     ticket_query = query.copy()
     if current_user.role == UserRole.EMPLOYEE:
         ticket_query["created_by"] = current_user.id
     
-    open_tickets = await db.tickets.count_documents({**ticket_query, "status": TicketStatus.OPEN})
-    pending_orders = await db.orders.count_documents({**query, "status": OrderStatus.PENDING})
+    total_assets, assigned_assets, available_assets, open_tickets, pending_orders = await asyncio.gather(
+        db.assets.count_documents(query),
+        db.assets.count_documents({**query, "status": AssetStatus.ASSIGNED}),
+        db.assets.count_documents({**query, "status": AssetStatus.AVAILABLE}),
+        db.tickets.count_documents({**ticket_query, "status": TicketStatus.OPEN}),
+        db.orders.count_documents({**query, "status": OrderStatus.PENDING}),
+    )
     
     stats = {
         "total_assets": total_assets,
@@ -3233,8 +3236,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     }
     
     if current_user.role == UserRole.SUPER_ADMIN:
-        stats["total_tenants"] = await db.tenants.count_documents({})
-        stats["total_users"] = await db.users.count_documents({})
+        stats["total_tenants"], stats["total_users"] = await asyncio.gather(
+            db.tenants.count_documents({}), db.users.count_documents({}))
     
     return stats
 
@@ -5744,53 +5747,68 @@ async def delete_asset_photo(asset_id: str, current_user: User = Depends(get_cur
 # DASHBOARD CHARTS DATA
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _last_months(now: datetime, n: int = 6) -> list:
+    """The last n calendar months, oldest first, as (first day of the month, label like 'Oct 2026', key like '2026-10')."""
+    out = []
+    for back in range(n - 1, -1, -1):
+        year, month = now.year, now.month - back
+        while month <= 0:
+            month += 12
+            year -= 1
+        first = datetime(year, month, 1, tzinfo=timezone.utc)
+        out.append((first, first.strftime("%b %Y"), first.strftime("%Y-%m")))
+    return out
+
+async def _count_by_field(collection, match: dict, field: str) -> dict:
+    """{value: count} for one field, computed inside the database in a single query."""
+    rows = await collection.aggregate([{"$match": match}, {"$group": {"_id": field, "n": {"$sum": 1}}}]).to_list(100)
+    return {r["_id"]: r["n"] for r in rows}
+
+async def _monthly_counts(collection, match: dict, since_iso: str) -> dict:
+    """{'YYYY-MM': count} of documents created since the given time, in a single query (created_at is an ISO string)."""
+    rows = await collection.aggregate([
+        {"$match": {**match, "created_at": {"$gte": since_iso}}},
+        {"$group": {"_id": {"$substrCP": ["$created_at", 0, 7]}, "n": {"$sum": 1}}},
+    ]).to_list(60)
+    return {r["_id"]: r["n"] for r in rows}
+
 @api_router.get("/dashboard/charts")
 async def get_dashboard_charts(current_user: User = Depends(get_current_user_hybrid)):
     tenant_q = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    now = datetime.now(timezone.utc)
+    months = _last_months(now, 6)
+    since_iso = months[0][0].isoformat()
+
+    # Every query below is independent, so they all run at the same time. This endpoint used to make ~22 queries
+    # one after another (each a round trip to the database); it now takes roughly the time of one.
+    (asset_counts, order_counts, ticket_counts, ticket_status_counts,
+     licenses_raw, category_docs, product_docs, asset_groups) = await asyncio.gather(
+        _count_by_field(db.assets, {**tenant_q, "is_deleted": {"$ne": True}}, "$status"),
+        _monthly_counts(db.orders, tenant_q, since_iso),
+        _monthly_counts(db.tickets, tenant_q, since_iso),
+        _count_by_field(db.tickets, tenant_q, "$status"),
+        db.licenses.find(tenant_q, {"_id": 0}).to_list(100),
+        db.product_categories.find({}, {"_id": 0, "key": 1, "name": 1}).to_list(1000),
+        db.products.find({}, {"_id": 0, "id": 1, "category": 1}).to_list(10000),
+        db.assets.aggregate([
+            {"$match": {**tenant_q, "is_deleted": {"$ne": True}}},
+            {"$group": {"_id": "$product_id", "n": {"$sum": 1}, "value": {"$sum": {"$ifNull": ["$purchase_price", 0]}}}},
+        ]).to_list(10000),
+    )
 
     # Asset status breakdown
     statuses = ["available", "assigned", "in_use", "under_maintenance", "disposed", "checked_out"]
-    asset_status_data = []
-    for s in statuses:
-        count = await db.assets.count_documents({**tenant_q, "status": s, "is_deleted": {"$ne": True}})
-        if count > 0:
-            asset_status_data.append({"name": s.replace("_", " ").title(), "value": count})
+    asset_status_data = [{"name": s.replace("_", " ").title(), "value": asset_counts[s]} for s in statuses if asset_counts.get(s, 0) > 0]
 
-    # Monthly orders (last 6 months)
-    monthly_orders = []
-    now = datetime.now(timezone.utc)
-    for i in range(5, -1, -1):
-        month_start = (now.replace(day=1) - timedelta(days=i * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if i == 0:
-            month_end = now
-        else:
-            next_m = month_start.replace(day=28) + timedelta(days=4)
-            month_end = next_m.replace(day=1)
-        count = await db.orders.count_documents({**tenant_q, "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}})
-        monthly_orders.append({"month": month_start.strftime("%b %Y"), "orders": count})
-
-    # Ticket trends (last 6 months)
-    ticket_trends = []
-    for i in range(5, -1, -1):
-        month_start = (now.replace(day=1) - timedelta(days=i * 30)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if i == 0:
-            month_end = now
-        else:
-            next_m = month_start.replace(day=28) + timedelta(days=4)
-            month_end = next_m.replace(day=1)
-        count = await db.tickets.count_documents({**tenant_q, "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}})
-        ticket_trends.append({"month": month_start.strftime("%b %Y"), "tickets": count})
+    # Monthly orders and ticket trends (last 6 months)
+    monthly_orders = [{"month": label, "orders": order_counts.get(key, 0)} for _, label, key in months]
+    ticket_trends = [{"month": label, "tickets": ticket_counts.get(key, 0)} for _, label, key in months]
 
     # Ticket by status
     ticket_statuses = ["open", "in_progress", "resolved", "closed"]
-    ticket_status_data = []
-    for s in ticket_statuses:
-        count = await db.tickets.count_documents({**tenant_q, "status": s})
-        if count > 0:
-            ticket_status_data.append({"name": s.replace("_", " ").title(), "value": count})
+    ticket_status_data = [{"name": s.replace("_", " ").title(), "value": ticket_status_counts[s]} for s in ticket_statuses if ticket_status_counts.get(s, 0) > 0]
 
     # License seat utilization
-    licenses_raw = await db.licenses.find(tenant_q, {"_id": 0}).to_list(100)
     license_utilization = []
     for lic in licenses_raw:
         total = lic.get("seats_total", 0)
@@ -5804,14 +5822,14 @@ async def get_dashboard_charts(current_user: User = Depends(get_current_user_hyb
         })
 
     # Assets and purchase value per product category (names come from the global category list)
-    cat_names = {c["key"]: c["name"] for c in await db.product_categories.find({}, {"_id": 0, "key": 1, "name": 1}).to_list(1000)}
-    prod_key = {p["id"]: _category_key(p.get("category")) async for p in db.products.find({}, {"_id": 0, "id": 1, "category": 1})}
+    cat_names = {c["key"]: c["name"] for c in category_docs}
+    prod_key = {p["id"]: _category_key(p.get("category")) for p in product_docs}
     per_cat: dict = {}
-    async for a in db.assets.find({**tenant_q, "is_deleted": {"$ne": True}}, {"_id": 0, "product_id": 1, "purchase_price": 1}):
-        k = prod_key.get(a.get("product_id"), "")
+    for g in asset_groups:
+        k = prod_key.get(g["_id"], "")
         row = per_cat.setdefault(k, {"name": cat_names.get(k, "Uncategorised") if k else "Uncategorised", "value": 0, "total_value": 0.0})
-        row["value"] += 1
-        row["total_value"] += a.get("purchase_price") or 0
+        row["value"] += g["n"]
+        row["total_value"] += g["value"] or 0
     assets_by_category = sorted(per_cat.values(), key=lambda r: -r["value"])
 
     return {
@@ -5846,16 +5864,19 @@ async def get_dashboard_attention(current_user: User = Depends(get_current_user)
     now_iso = datetime.now(timezone.utc).isoformat()
     soon_iso = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
     open_q = {**tq, "status": {"$in": ["open", "in_progress"]}}
+    sla_breached, sla_due_soon = await asyncio.gather(
+        db.tickets.count_documents({**open_q, "sla_due_at": {"$lt": now_iso}}),
+        db.tickets.count_documents({**open_q, "sla_due_at": {"$gte": now_iso, "$lte": soon_iso}}),
+    )
     result = {
-        "sla_breached": await db.tickets.count_documents({**open_q, "sla_due_at": {"$lt": now_iso}}),
-        "sla_due_soon": await db.tickets.count_documents({**open_q, "sla_due_at": {"$gte": now_iso, "$lte": soon_iso}}),
+        "sla_breached": sla_breached, "sla_due_soon": sla_due_soon,
         "expiring_30": 0, "expired": 0, "over_used_licenses": 0, "top": [],
     }
     if current_user.role != UserRole.HELPDESK_AGENT:
-        items = await _collect_expiring(tid, 30)
+        items, over_used = await asyncio.gather(_collect_expiring(tid, 30), _over_used_licenses(tid))
         summary = _summarize_expiring(items)
         result.update({"expiring_30": summary["within_30"], "expired": summary["expired"],
-                       "over_used_licenses": len(await _over_used_licenses(tid)), "top": items[:5]})
+                       "over_used_licenses": len(over_used), "top": items[:5]})
     return result
 
 @api_router.get("/reports/assets-by-department")
@@ -5864,21 +5885,24 @@ async def report_assets_by_department(current_user: User = Depends(get_current_u
         raise HTTPException(status_code=403, detail="Access denied")
     tenant_q = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
     departments = await db.departments.find(tenant_q, {"_id": 0}).to_list(200)
-    result = []
-    for dept in departments:
-        assets = await db.assets.find({"department_id": dept["id"], "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(10000)
+    now = datetime.now(timezone.utc)
+
+    async def dept_row(dept: dict) -> dict:
+        assets = await db.assets.find({"department_id": dept["id"], "is_deleted": {"$ne": True}}, {"_id": 0, "photo_url": 0}).to_list(10000)
         count = len(assets)
         total_value = sum(a.get("purchase_price") or 0 for a in assets)
-        now = datetime.now(timezone.utc)
         current_value = sum(_depreciated_value(a, now) for a in assets)
         amc_cost = 0.0
         if assets:
             async for c in db.amc_contracts.find({"asset_id": {"$in": [a["id"] for a in assets]}, "status": {"$nin": ["cancelled", "terminated"]}},
                                                  {"_id": 0, "annual_cost": 1}):
                 amc_cost += c.get("annual_cost") or 0
-        result.append({"department": dept["name"], "asset_count": count, "total_value": total_value,
-                       "current_value": round(current_value, 2), "depreciation": round(total_value - current_value, 2),
-                       "amc_annual_cost": round(amc_cost, 2)})
+        return {"department": dept["name"], "asset_count": count, "total_value": total_value,
+                "current_value": round(current_value, 2), "depreciation": round(total_value - current_value, 2),
+                "amc_annual_cost": round(amc_cost, 2)}
+
+    # One task per department, run together instead of department after department.
+    result = list(await asyncio.gather(*[dept_row(d) for d in departments]))
     # Add unassigned
     no_dept = await db.assets.count_documents({**tenant_q, "department_id": None, "is_deleted": {"$ne": True}})
     if no_dept > 0:
