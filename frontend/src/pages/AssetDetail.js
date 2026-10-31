@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '../components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Separator } from '../components/ui/separator';
 import {
@@ -582,20 +582,35 @@ const AssetDetail = () => {
                   Checkout
                 </Button>
               )}
-              <Button onClick={() => setMaintenanceDialogOpen(true)} variant="outline" data-testid="schedule-maintenance-btn">
-                <Plus className="h-4 w-4 mr-2" />
-                Schedule Maintenance
-              </Button>
-              {asset.status !== 'disposed' && (
-                <Button variant="destructive" onClick={() => setDisposeDialogOpen(true)}>
-                  <XCircle className="h-4 w-4 mr-2" />
-                  Dispose
-                </Button>
-              )}
-              <Button variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteOpen(true)} data-testid="delete-asset-btn">
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" data-testid="asset-more-btn">
+                    <MoreHorizontal className="h-4 w-4 mr-2" />
+                    More
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setMaintenanceDialogOpen(true)} data-testid="schedule-maintenance-btn">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Schedule Maintenance
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setActiveTab('qrcode')}>
+                    <Printer className="h-4 w-4 mr-2" />
+                    Print QR Label
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {asset.status !== 'disposed' && (
+                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDisposeDialogOpen(true)}>
+                      <XCircle className="h-4 w-4 mr-2" />
+                      Dispose
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleteOpen(true)} data-testid="delete-asset-btn">
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
           </>)}
           </div>
         </div>
