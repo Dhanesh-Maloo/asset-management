@@ -4044,6 +4044,53 @@ async def calculate_depreciation(asset_id: str, current_user: User = Depends(get
     }
 
 # Warranty expiry check
+@api_router.get("/search")
+async def global_search(q: str = Query("", max_length=100), current_user: User = Depends(get_current_user)):
+    """One search over assets, tickets, people and orders, limited to what the caller may see (5 per kind)."""
+    q = q.strip()
+    if len(q) < 2:
+        return {"assets": [], "tickets": [], "users": [], "orders": []}
+    rx = {"$regex": re.escape(q), "$options": "i"}
+    is_super = current_user.role == UserRole.SUPER_ADMIN
+    is_employee = current_user.role == UserRole.EMPLOYEE
+    can_see_people = current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
+    tenant = {} if is_super else {"tenant_id": current_user.tenant_id}
+
+    asset_q = {**tenant, "is_deleted": {"$ne": True}, "$or": [{"asset_tag": rx}, {"serial_number": rx}, {"name": rx}]}
+    if is_employee:
+        asset_q["assigned_to"] = current_user.id
+    ticket_q = {**tenant, "$or": [{"title": rx}, {"ticket_number": rx}]}
+    if is_employee:
+        ticket_q["created_by"] = current_user.id
+
+    async def find_assets():
+        return await db.assets.find(asset_q, {"_id": 0, "id": 1, "asset_tag": 1, "serial_number": 1, "status": 1}).limit(5).to_list(5)
+
+    async def find_tickets():
+        return await db.tickets.find(ticket_q, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1}).limit(5).to_list(5)
+
+    async def find_users():
+        if not can_see_people:
+            return []
+        return await db.users.find({**tenant, "$or": [{"name": rx}, {"email": rx}, {"employee_id": rx}]},
+                                   {"_id": 0, "id": 1, "name": 1, "email": 1}).limit(5).to_list(5)
+
+    async def find_orders():
+        prods = await db.products.find({"name": rx, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).limit(20).to_list(20)
+        names = {p["id"]: p["name"] for p in prods}
+        order_q = {**tenant, "$or": [{"product_id": {"$in": list(names)}}, {"id": {"$regex": "^" + re.escape(q.lower())}}]}
+        if is_employee:
+            order_q["user_id"] = current_user.id
+        orders = await db.orders.find(order_q, {"_id": 0, "id": 1, "product_id": 1, "status": 1, "quantity": 1}).limit(5).to_list(5)
+        missing = [o["product_id"] for o in orders if o["product_id"] not in names]
+        if missing:
+            for p in await db.products.find({"id": {"$in": missing}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(missing)):
+                names[p["id"]] = p["name"]
+        return [{**o, "product_name": names.get(o["product_id"], "Product")} for o in orders]
+
+    assets, tickets, users, orders = await asyncio.gather(find_assets(), find_tickets(), find_users(), find_orders())
+    return {"assets": assets, "tickets": tickets, "users": users, "orders": orders}
+
 @api_router.get("/assets/warranty/expiring")
 async def get_expiring_warranties(days: int = 30, current_user: User = Depends(get_current_user)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:

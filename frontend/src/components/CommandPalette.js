@@ -14,7 +14,7 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from './ui/command';
-import { Laptop, Plus, Ticket, Sun, Moon, LogOut, ArrowRight } from 'lucide-react';
+import { Laptop, Plus, Ticket, Sun, Moon, LogOut, ArrowRight, User as UserIcon, ShoppingCart } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -24,12 +24,14 @@ const QUICK_ACTIONS = [
   { id: 'create-ticket', label: 'Create Ticket', icon: Ticket, href: '/tickets', roles: null },
 ];
 
+const EMPTY_RESULTS = { assets: [], tickets: [], users: [], orders: [] };
+
 export const CommandPalette = ({ open, onOpenChange, darkMode, onToggleDarkMode }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { isFeatureEnabled } = useTenant();
   const [query, setQuery] = useState('');
-  const [assetResults, setAssetResults] = useState([]);
+  const [results, setResults] = useState({ assets: [], tickets: [], users: [], orders: [] });
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef(null);
 
@@ -37,25 +39,25 @@ export const CommandPalette = ({ open, onOpenChange, darkMode, onToggleDarkMode 
   useEffect(() => {
     if (!open) {
       setQuery('');
-      setAssetResults([]);
+      setResults(EMPTY_RESULTS);
     }
   }, [open]);
 
-  // Debounced live asset search
+  // Debounced live search across assets, tickets, people and orders
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.trim().length < 2) {
-      setAssetResults([]);
+      setResults(EMPTY_RESULTS);
       setSearching(false);
       return;
     }
     setSearching(true);
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await axios.get(`${API}/assets`, { params: { search: query.trim(), limit: 6 } });
-        setAssetResults(Array.isArray(res.data) ? res.data.slice(0, 6) : []);
+        const res = await axios.get(`${API}/search`, { params: { q: query.trim() } });
+        setResults({ ...EMPTY_RESULTS, ...res.data });
       } catch {
-        setAssetResults([]);
+        setResults(EMPTY_RESULTS);
       } finally {
         setSearching(false);
       }
@@ -93,7 +95,7 @@ export const CommandPalette = ({ open, onOpenChange, darkMode, onToggleDarkMode 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
       <CommandInput
-        placeholder="Search assets, pages, actions…"
+        placeholder="Search assets, tickets, people, orders, pages…"
         value={query}
         onValueChange={setQuery}
       />
@@ -103,10 +105,10 @@ export const CommandPalette = ({ open, onOpenChange, darkMode, onToggleDarkMode 
         </CommandEmpty>
 
         {/* Live asset results */}
-        {assetResults.length > 0 && (
+        {results.assets.length > 0 && (
           <>
             <CommandGroup heading="Assets">
-              {assetResults.map((asset) => (
+              {results.assets.map((asset) => (
                 <CommandItem
                   key={asset.id}
                   value={`asset-${asset.id}`}
@@ -125,6 +127,59 @@ export const CommandPalette = ({ open, onOpenChange, darkMode, onToggleDarkMode 
                   <span className="text-[11px] text-muted-foreground capitalize shrink-0">
                     {(asset.status || '').replace(/_/g, ' ')}
                   </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
+        {results.tickets.length > 0 && (
+          <>
+            <CommandGroup heading="Tickets">
+              {results.tickets.map((tk) => (
+                <CommandItem key={tk.id} value={`ticket-${tk.id}`} onSelect={() => run(() => navigate('/tickets'))} className="cursor-pointer">
+                  <Ticket className="text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <span className="font-mono text-[13px] font-semibold text-primary">{tk.ticket_number}</span>
+                    <span className="ml-2 text-xs text-muted-foreground truncate">{tk.title}</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground capitalize shrink-0">{(tk.status || '').replace(/_/g, ' ')}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
+        {results.users.length > 0 && (
+          <>
+            <CommandGroup heading="People">
+              {results.users.map((u) => (
+                <CommandItem key={u.id} value={`user-${u.id}`} onSelect={() => run(() => navigate('/users'))} className="cursor-pointer">
+                  <UserIcon className="text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[13px] font-medium">{u.name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground truncate">{u.email}</span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
+
+        {results.orders.length > 0 && (
+          <>
+            <CommandGroup heading="Orders">
+              {results.orders.map((o) => (
+                <CommandItem key={o.id} value={`order-${o.id}`} onSelect={() => run(() => navigate('/orders'))} className="cursor-pointer">
+                  <ShoppingCart className="text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[13px] font-medium">{o.product_name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">x{o.quantity} · #{o.id.slice(0, 8)}</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground capitalize shrink-0">{(o.status || '').replace(/_/g, ' ')}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

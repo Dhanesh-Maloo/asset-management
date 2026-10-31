@@ -180,7 +180,7 @@ const DashboardLayout = ({ children }) => {
             data-testid="global-search"
           >
             <Search className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">Search assets, pages, actions…</span>
+            <span className="flex-1 text-left">Search assets, tickets, people, orders…</span>
             <kbd className="hidden lg:flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-card border border-border text-[10px] font-mono font-medium group-hover:border-ring/40 transition-colors">
               Ctrl K
             </kbd>
