@@ -338,6 +338,16 @@
 .dark .hover\:bg-slate-50:hover { background-color: #1e293b !important; }
 .dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
 
+/* Native form controls (older pages use plain <select>/<input>/<textarea>): without this they keep a white
+   background while the text turns light in dark mode, so dropdown lists were unreadable. */
+.dark { color-scheme: dark; }
+.dark select, .dark select option, .dark select optgroup,
+.dark input[class*="border-slate"], .dark textarea[class*="border-slate"] {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+.dark select, .dark input[class*="border-slate"], .dark textarea[class*="border-slate"] { border-color: #475569; }
+
 /* ═══════════════════════════════════════════════════════════
    3D AUTH PAGES — Login & Signup
 ═══════════════════════════════════════════════════════════ */
