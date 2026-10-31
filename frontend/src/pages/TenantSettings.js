@@ -175,8 +175,9 @@ const TenantSettings = () => {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="space-y-4" aria-busy="true" aria-label="Loading settings">
+          <div className="h-8 w-56 shimmer rounded-md" />
+          {[...Array(4)].map((_, i) => <div key={i} className="h-24 shimmer rounded-lg" />)}
         </div>
       </DashboardLayout>
     );

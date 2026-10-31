@@ -61,7 +61,9 @@ const MasterQRs = () => {
         </div>
 
         {loading ? (
-          <p className="text-slate-500">Loading...</p>
+          <div className="space-y-3" aria-busy="true" aria-label="Loading">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-16 shimmer rounded-md" />)}
+          </div>
         ) : filtered.length === 0 ? (
           <Card>
             <CardContent className="py-16 text-center">

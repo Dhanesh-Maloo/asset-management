@@ -74,7 +74,15 @@ const MasterQRDetail = () => {
     }
   };
 
-  if (loading) return <DashboardLayout><p className="text-slate-500">Loading...</p></DashboardLayout>;
+  if (loading) return (
+    <DashboardLayout>
+      <div className="space-y-4" aria-busy="true" aria-label="Loading">
+        <div className="h-8 w-56 shimmer rounded-md" />
+        <div className="h-48 shimmer rounded-lg" />
+        <div className="h-32 shimmer rounded-lg" />
+      </div>
+    </DashboardLayout>
+  );
   if (!master) {
     return (
       <DashboardLayout>

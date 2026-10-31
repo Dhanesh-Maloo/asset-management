@@ -511,8 +511,18 @@ const AssetDetail = () => {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="space-y-6" aria-busy="true" aria-label="Loading asset">
+          <div className="h-8 w-64 shimmer rounded-md" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-4">
+              <div className="h-40 shimmer rounded-lg" />
+              <div className="h-64 shimmer rounded-lg" />
+            </div>
+            <div className="space-y-4">
+              <div className="h-56 shimmer rounded-lg" />
+              <div className="h-32 shimmer rounded-lg" />
+            </div>
+          </div>
         </div>
       </DashboardLayout>
     );

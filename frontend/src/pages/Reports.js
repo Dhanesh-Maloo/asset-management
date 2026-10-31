@@ -133,10 +133,9 @@ const Reports = () => {
         )}
 
         {loading ? (
-          <Card><CardContent className="py-20 text-center">
-            <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto"></div>
-            <p className="text-slate-500 mt-4">Loading report...</p>
-          </CardContent></Card>
+          <div className="space-y-3" aria-busy="true" aria-label="Loading report">
+            {[...Array(6)].map((_, i) => <div key={i} className="h-14 shimmer rounded-md" />)}
+          </div>
         ) : !data || data.length === 0 ? (
           <Card><CardContent className="py-20 text-center">
             <FileBarChart className="h-12 w-12 mx-auto text-slate-300 mb-3" />
