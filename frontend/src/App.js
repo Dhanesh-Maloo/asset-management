@@ -32,6 +32,8 @@ import ActivityFeed from './pages/ActivityFeed';
 import Reservations from './pages/Reservations';
 import InviteAccept from './pages/InviteAccept';
 import MasterQRs from './pages/MasterQRs';
+import Audits from './pages/Audits';
+import AuditDetail from './pages/AuditDetail';
 import MasterQRDetail from './pages/MasterQRDetail';
 import PublicMasterQR from './pages/PublicMasterQR';
 import { AssetRoute } from './pages/AssetRoute';
@@ -105,6 +107,24 @@ function AppRouter() {
               }
             />
             
+            <Route
+              path="/audits"
+              element={
+                <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager']}>
+                  <Audits />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/audits/:auditId"
+              element={
+                <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager']}>
+                  <AuditDetail />
+                </ProtectedRoute>
+              }
+            />
+
             <Route
               path="/master-qrs"
               element={

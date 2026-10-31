@@ -4091,6 +4091,122 @@ async def global_search(q: str = Query("", max_length=100), current_user: User =
     assets, tickets, users, orders = await asyncio.gather(find_assets(), find_tickets(), find_users(), find_orders())
     return {"assets": assets, "tickets": tickets, "users": users, "orders": orders}
 
+# ═══════════════════════════════════════════════════════════════════════════
+# STOCK-TAKE (physical audit of a location by scanning assets)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class AuditCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    location: str = Field(..., min_length=1, max_length=300)
+
+class AuditScan(BaseModel):
+    code: str = Field(..., min_length=1, max_length=200)
+
+def _audit_manager(user: User) -> None:
+    if user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+async def _get_audit_for_user(audit_id: str, user: User) -> dict:
+    audit = await db.stock_audits.find_one({"id": audit_id}, {"_id": 0})
+    if not audit or (user.role != UserRole.SUPER_ADMIN and audit.get("tenant_id") != user.tenant_id):
+        raise HTTPException(status_code=404, detail="Stock-take not found")
+    return audit
+
+def _audit_summary(audit: dict) -> dict:
+    """Work out what was found, what is missing and what turned up that does not belong, from the stored scans."""
+    expected = audit.get("expected", [])
+    scanned = audit.get("scanned", [])
+    scanned_ids = {x["asset_id"] for x in scanned}
+    found = [x for x in scanned if x.get("expected")]
+    unexpected = [x for x in scanned if not x.get("expected")]
+    missing = [e for e in expected if e["id"] not in scanned_ids]
+    return {"expected_count": len(expected), "found_count": len(found), "missing_count": len(missing),
+            "unexpected_count": len(unexpected), "unknown_count": len(audit.get("unknown", [])),
+            "found": found, "missing": missing, "unexpected": unexpected, "unknown": audit.get("unknown", [])}
+
+_AUDIT_HEADER_FIELDS = ("id", "name", "location", "status", "created_by_name", "created_at", "completed_at")
+
+@api_router.post("/audits")
+async def create_audit(body: AuditCreate, current_user: User = Depends(get_current_user)):
+    """Start a stock-take: snapshot the assets the system says are at this location."""
+    _audit_manager(current_user)
+    location = body.location.strip()
+    query = {**_tenant_scope(current_user), "is_deleted": {"$ne": True}, "status": {"$ne": AssetStatus.DISPOSED},
+             "location": {"$regex": f"^{re.escape(location)}$", "$options": "i"}}
+    assets = await db.assets.find(query, {"_id": 0, "id": 1, "asset_tag": 1, "serial_number": 1}).to_list(5000)
+    audit = {
+        "id": str(uuid.uuid4()), "tenant_id": current_user.tenant_id, "name": body.name.strip(), "location": location,
+        "status": "open", "created_by": current_user.id, "created_by_name": current_user.name,
+        "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None,
+        "expected": [{"id": a["id"], "asset_tag": a.get("asset_tag", ""), "serial_number": a.get("serial_number", "")} for a in assets],
+        "scanned": [], "unknown": [],
+    }
+    await db.stock_audits.insert_one(dict(audit))
+    return {**{k: audit[k] for k in _AUDIT_HEADER_FIELDS}, "expected_count": len(assets)}
+
+@api_router.get("/audits")
+async def list_audits(current_user: User = Depends(get_current_user)):
+    _audit_manager(current_user)
+    audits = await db.stock_audits.find(_tenant_scope(current_user), {"_id": 0}).sort("created_at", -1).to_list(200)
+    out = []
+    for a in audits:
+        summ = _audit_summary(a)
+        out.append({**{k: a.get(k) for k in _AUDIT_HEADER_FIELDS},
+                    **{k: summ[k] for k in ("expected_count", "found_count", "missing_count", "unexpected_count")}})
+    return out
+
+@api_router.get("/audits/{audit_id}")
+async def get_audit(audit_id: str, current_user: User = Depends(get_current_user)):
+    _audit_manager(current_user)
+    audit = await _get_audit_for_user(audit_id, current_user)
+    return {**{k: audit.get(k) for k in _AUDIT_HEADER_FIELDS}, **_audit_summary(audit)}
+
+@api_router.post("/audits/{audit_id}/scan")
+async def scan_audit(audit_id: str, body: AuditScan, current_user: User = Depends(get_current_user)):
+    """Record one scanned code (asset id, tag or serial) against an open stock-take."""
+    _audit_manager(current_user)
+    audit = await _get_audit_for_user(audit_id, current_user)
+    if audit["status"] != "open":
+        raise HTTPException(status_code=400, detail="This stock-take is already completed")
+    code = body.code.strip()
+    ci = {"$regex": f"^{re.escape(code)}$", "$options": "i"}
+    asset = await db.assets.find_one(
+        {**_tenant_scope(current_user), "is_deleted": {"$ne": True}, "$or": [{"id": code}, {"serial_number": ci}, {"asset_tag": ci}]},
+        {"_id": 0, "id": 1, "asset_tag": 1, "location": 1, "status": 1})
+    now = datetime.now(timezone.utc).isoformat()
+    if not asset:
+        await db.stock_audits.update_one({"id": audit_id}, {"$addToSet": {"unknown": code}})
+        return {"result": "unknown", "code": code}
+    expected_ids = {e["id"] for e in audit.get("expected", [])}
+    entry = {"asset_id": asset["id"], "asset_tag": asset.get("asset_tag", ""), "at": now, "by": current_user.id,
+             "expected": asset["id"] in expected_ids, "system_location": asset.get("location") or ""}
+    # the filter makes the push a no-op if the same asset was scanned a moment ago on another device
+    res = await db.stock_audits.update_one({"id": audit_id, "scanned.asset_id": {"$ne": asset["id"]}}, {"$push": {"scanned": entry}})
+    if res.modified_count == 0:
+        return {"result": "duplicate", "asset_tag": entry["asset_tag"]}
+    return {"result": "found" if entry["expected"] else "unexpected", "asset_tag": entry["asset_tag"],
+            "system_location": entry["system_location"]}
+
+@api_router.post("/audits/{audit_id}/complete")
+async def complete_audit(audit_id: str, current_user: User = Depends(get_current_user)):
+    _audit_manager(current_user)
+    audit = await _get_audit_for_user(audit_id, current_user)
+    if audit["status"] != "open":
+        raise HTTPException(status_code=400, detail="This stock-take is already completed")
+    await db.stock_audits.update_one({"id": audit_id}, {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}})
+    summary = _audit_summary(audit)
+    await write_audit_log(current_user.id, "stock_take_complete", "audit", audit_id,
+                          f"{audit['name']} @ {audit['location']}: {summary['found_count']} found, {summary['missing_count']} missing, "
+                          f"{summary['unexpected_count']} unexpected", tenant_id=current_user.tenant_id)
+    return {"message": "Stock-take completed"}
+
+@api_router.delete("/audits/{audit_id}")
+async def delete_audit(audit_id: str, current_user: User = Depends(get_current_user)):
+    _audit_manager(current_user)
+    await _get_audit_for_user(audit_id, current_user)
+    await db.stock_audits.delete_one({"id": audit_id})
+    return {"message": "Stock-take deleted"}
+
 @api_router.get("/assets/warranty/expiring")
 async def get_expiring_warranties(days: int = 30, current_user: User = Depends(get_current_user)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
@@ -7163,6 +7279,7 @@ _EXTRA_INDEXES = [
     ("tenants", [("id", 1)]),
     ("maintenance_schedules", [("tenant_id", 1), ("status", 1)]),
     ("audit_log", [("tenant_id", 1), ("timestamp", -1)]),
+    ("stock_audits", [("tenant_id", 1), ("created_at", -1)]),
     ("asset_history", [("asset_id", 1), ("date", 1)]),
 ]
 
