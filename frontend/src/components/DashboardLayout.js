@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import OnboardingModal from './OnboardingModal';
 import CommandPalette from './CommandPalette';
-import { Menu, Bell, Sun, Moon, Search, User, LogOut, ChevronDown } from 'lucide-react';
+import { Menu, Bell, Sun, Moon, Search, User, LogOut, ChevronDown, X } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -93,7 +93,30 @@ const DashboardLayout = ({ children }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seenKey, !!user]);
   const notifKey = (n) => n.type;
-  const isUnread = (n) => seenLoaded && seen[notifKey(n)] !== n.count;
+
+  // Dismissed notifications stay hidden until their count changes (new activity), and can be listed again with "Show cleared".
+  const dismissedKey = `dismissedNotifications_${user?.id || user?.email}`;
+  const [dismissed, setDismissed] = useState({});
+  const [showCleared, setShowCleared] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    try { setDismissed(JSON.parse(localStorage.getItem(dismissedKey) || '{}')); } catch { setDismissed({}); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dismissedKey, !!user]);
+  const saveDismissed = (next) => {
+    setDismissed(next);
+    try { localStorage.setItem(dismissedKey, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  };
+  const isDismissed = (n) => dismissed[notifKey(n)] === n.count;
+  const dismissOne = (n) => saveDismissed({ ...dismissed, [notifKey(n)]: n.count });
+  const dismissAll = () => {
+    const next = { ...dismissed };
+    notifications.forEach((n) => { next[notifKey(n)] = n.count; });
+    saveDismissed(next);
+  };
+  const clearedCount = notifications.filter(isDismissed).length;
+  const visibleNotifications = showCleared ? notifications : notifications.filter((n) => !isDismissed(n));
+  const isUnread = (n) => seenLoaded && seen[notifKey(n)] !== n.count && dismissed[notifKey(n)] !== n.count;
   const totalCount = notifications.filter(isUnread).reduce((sum, n) => sum + (n.count || 0), 0);
 
   // What was unread at the moment the dropdown opened, so the list can still highlight it after it is marked seen.
@@ -212,13 +235,13 @@ const DashboardLayout = ({ children }) => {
                   </div>
 
                   <div className="max-h-72 overflow-y-auto">
-                    {notifications.length === 0 ? (
+                    {visibleNotifications.length === 0 ? (
                       <div className="py-8 text-center text-sm text-muted-foreground">
                         <Bell className="h-8 w-8 mx-auto mb-2 opacity-30" />
                         All caught up!
                       </div>
                     ) : (
-                      notifications.map((n, i) => (
+                      visibleNotifications.map((n, i) => (
                         <a
                           key={n.type || i}
                           href={n.link || '#'}
@@ -233,18 +256,44 @@ const DashboardLayout = ({ children }) => {
                           <span className={`text-xs font-bold rounded-full px-2 py-0.5 mt-0.5 ${newTypes.includes(n.type) ? 'text-white bg-primary' : 'text-muted-foreground bg-muted'}`}>
                             {n.count}
                           </span>
+                          {!isDismissed(n) && (
+                            <button
+                              type="button"
+                              aria-label="Dismiss notification"
+                              title="Dismiss"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismissOne(n); }}
+                              className="mt-0.5 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </a>
                       ))
                     )}
                   </div>
 
-                  <div className="px-4 py-2 border-t border-border bg-muted/40">
+                  <div className="px-4 py-2 border-t border-border bg-muted/40 flex items-center justify-between gap-3">
                     <button
                       onClick={() => { fetchNotifications(); setNotifOpen(false); }}
                       className="text-xs text-primary hover:underline font-medium"
                     >
                       Refresh
                     </button>
+                    <div className="flex items-center gap-3">
+                      {clearedCount > 0 && (
+                        <button
+                          onClick={() => setShowCleared(!showCleared)}
+                          className="text-xs text-muted-foreground hover:underline"
+                        >
+                          {showCleared ? 'Hide cleared' : `Show cleared (${clearedCount})`}
+                        </button>
+                      )}
+                      {notifications.some((n) => !isDismissed(n)) && (
+                        <button onClick={dismissAll} className="text-xs text-primary hover:underline font-medium">
+                          Clear all
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
