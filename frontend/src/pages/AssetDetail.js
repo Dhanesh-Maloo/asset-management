@@ -20,8 +20,9 @@ import {
   LogOut as ReturnIcon, LogIn as CheckoutIcon, TrendingDown,
   Plus, AlertCircle, CheckCircle, QrCode, Printer, Clock,
   Camera, Trash2, ArrowRightLeft, Settings2, FileText, Upload,
-  Download, XCircle, Wrench as AMCIcon, RefreshCw, MoreHorizontal
+  Download, XCircle, Wrench as AMCIcon, RefreshCw, MoreHorizontal, Pencil
 } from 'lucide-react';
+import { EditAssetDialog } from '../components/EditAssetDialog';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
 
@@ -308,6 +309,23 @@ const AssetDetail = () => {
 
   const canManage = ['super_admin', 'tenant_admin', 'asset_manager'].includes(user?.role);
 
+  // ── Edit / Delete ────────────────────────────────────────────────────────
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAsset = async () => {
+    setDeleting(true);
+    try {
+      await axios.delete(`${API}/assets/${assetId}`);
+      toast.success('Asset deleted successfully');
+      navigate('/assets');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete asset');
+      setDeleting(false);
+    }
+  };
+
   // ── Photo Upload ─────────────────────────────────────────────────────────
   const [photoUploading, setPhotoUploading] = useState(false);
 
@@ -539,6 +557,10 @@ const AssetDetail = () => {
               Report Issue
             </Button>
           {canManage && (<>
+              <Button variant="outline" onClick={() => setEditOpen(true)} data-testid="edit-asset-btn">
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
               {asset.status === 'checked_out' ? (
                 <Button onClick={() => setReturnDialogOpen(true)} data-testid="return-asset-btn">
                   <ReturnIcon className="h-4 w-4 mr-2" />
@@ -560,6 +582,10 @@ const AssetDetail = () => {
                   Dispose
                 </Button>
               )}
+              <Button variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteOpen(true)} data-testid="delete-asset-btn">
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
           </>)}
           </div>
         </div>
@@ -1516,6 +1542,25 @@ const AssetDetail = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAmcDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleAddAMC} disabled={amcSaving}>{amcSaving ? 'Saving...' : 'Add Contract'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <EditAssetDialog open={editOpen} onOpenChange={setEditOpen} asset={asset} onSaved={fetchAssetDetails} />
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent data-testid="delete-asset-dialog">
+          <DialogHeader>
+            <DialogTitle>Delete Asset</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{asset?.asset_tag}</strong>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteAsset} disabled={deleting} data-testid="confirm-delete-asset-btn">
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

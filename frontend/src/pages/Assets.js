@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../components/ui/collapsible';
 import { Popover, PopoverTrigger, PopoverContent } from '../components/ui/popover';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../components/ui/dropdown-menu';
-import { Laptop, Eye, Plus, Trash2, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, RefreshCw, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera, QrCode } from 'lucide-react';
+import { Laptop, Eye, Plus, Search, Download, CheckSquare, Square, Pencil, Printer, FileSpreadsheet, AlertTriangle, Upload, UserPlus, ChevronDown, SlidersHorizontal, Filter, ScanLine, Camera, QrCode } from 'lucide-react';
 import { BarcodeScannerDialog } from '../components/BarcodeScannerDialog';
 import { ScanResultDialog } from '../components/ScanResultDialog';
 import { ScanToAddDialog } from '../components/ScanToAddDialog';
@@ -37,15 +37,11 @@ const Assets = () => {
   const [loading, setLoading] = useState(true);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [assignUserId, setAssignUserId] = useState('');
-  const [statusUpdate, setStatusUpdate] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [addAssetDialogOpen, setAddAssetDialogOpen] = useState(false);
   const [addAssetAdvancedOpen, setAddAssetAdvancedOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [showMoreColumns, setShowMoreColumns] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [assetToDelete, setAssetToDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [demoFilter, setDemoFilter] = useState('');
@@ -63,10 +59,6 @@ const Assets = () => {
   const [scanResult, setScanResult] = useState(null);
   const [scanResultOpen, setScanResultOpen] = useState(false);
 
-  // Edit Asset state
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editingAsset, setEditingAsset] = useState(null);
-  const [editForm, setEditForm] = useState({});
   const [departments, setDepartments] = useState([]);
 
   // Department filter
@@ -154,37 +146,6 @@ const Assets = () => {
     }
   };
 
-  const handleStatusUpdate = async () => {
-    if (!statusUpdate) {
-      toast.error('Please select a status');
-      return;
-    }
-    
-    try {
-      await axios.patch(`${API}/assets/${selectedAsset.id}`, {
-        status: statusUpdate
-      });
-      toast.success('Asset status updated');
-      setStatusDialogOpen(false);
-      setStatusUpdate('');
-      fetchData();
-    } catch (error) {
-      toast.error('Failed to update status');
-    }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await axios.delete(`${API}/assets/${assetToDelete.id}`);
-      toast.success('Asset deleted successfully');
-      setDeleteDialogOpen(false);
-      setAssetToDelete(null);
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to delete asset');
-    }
-  };
-
   const handleExportCSV = async () => {
     try {
       const response = await axios.get(`${API}/assets/export/csv`, { responseType: 'blob' });
@@ -221,48 +182,6 @@ const Assets = () => {
       const res = await axios.get(`${API}/product-categories`);
       setCategoryOptions(res.data);
     } catch { /* silently fail */ }
-  };
-
-  const openEditDialog = (asset) => {
-    setEditingAsset(asset);
-    setEditForm({
-      asset_tag: asset.asset_tag || '',
-      serial_number: asset.serial_number || '',
-      status: asset.status || 'available',
-      location: asset.location || '',
-      department_id: asset.department_id || '',
-      purchase_date: asset.purchase_date ? asset.purchase_date.slice(0, 10) : '',
-      warranty_start_date: asset.warranty_start_date ? asset.warranty_start_date.slice(0, 10) : '',
-      warranty_end_date: asset.warranty_end_date ? asset.warranty_end_date.slice(0, 10) : '',
-      warranty_provider: asset.warranty_provider || '',
-      purchase_price: asset.purchase_price || 0,
-      depreciation_method: asset.depreciation_method || 'straight_line',
-      depreciation_rate: asset.depreciation_rate ?? 20,
-      salvage_value: asset.salvage_value || 0,
-      expiry_date: asset.expiry_date ? asset.expiry_date.slice(0, 10) : '',
-      is_leased: asset.is_leased || false,
-      lessor_name: asset.lessor_name || '',
-      lease_start_date: asset.lease_start_date ? asset.lease_start_date.slice(0, 10) : '',
-      lease_end_date: asset.lease_end_date ? asset.lease_end_date.slice(0, 10) : '',
-      monthly_lease_payment: asset.monthly_lease_payment || 0,
-    });
-    setEditDialogOpen(true);
-  };
-
-  const handleEditSave = async () => {
-    try {
-      const payload = {};
-      Object.entries(editForm).forEach(([k, v]) => {
-        if (v !== '' && v !== null && v !== undefined) payload[k] = v;
-      });
-      await axios.patch(`${API}/assets/${editingAsset.id}`, payload);
-      toast.success('Asset updated successfully');
-      setEditDialogOpen(false);
-      setEditingAsset(null);
-      fetchData();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Failed to update asset');
-    }
   };
 
   const handleImport = async () => {
@@ -763,7 +682,11 @@ const Assets = () => {
                   <TableBody>
                     {assets.map((asset) => (
                       <TableRow key={asset.id} data-testid={`asset-row-${asset.id}`}
-                        className={`group transition-colors ${selectedIds.includes(asset.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-accent/50'}`}>
+                        onClick={(e) => { if (!e.target.closest('button, a, input, select, label, [role="button"]')) navigate(`/assets/${asset.id}`); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/assets/${asset.id}`); }}
+                        tabIndex={0}
+                        title="Open asset details"
+                        className={`group cursor-pointer transition-colors ${selectedIds.includes(asset.id) ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-accent/50'}`}>
                         {canManage && (
                           <TableCell>
                             <button onClick={() => toggleSelect(asset.id)} className="text-muted-foreground hover:text-primary transition-colors">
@@ -835,40 +758,6 @@ const Assets = () => {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0"
-                                onClick={() => {
-                                  setSelectedAsset(asset);
-                                  setStatusDialogOpen(true);
-                                }}
-                                title="Update status"
-                                data-testid={`status-btn-${asset.id}`}
-                              >
-                                <RefreshCw className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0"
-                                onClick={() => openEditDialog(asset)}
-                                title="Edit asset"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => {
-                                  setAssetToDelete(asset);
-                                  setDeleteDialogOpen(true);
-                                }}
-                                title="Delete asset"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
                             </div>
                           </TableCell>
                         )}
@@ -912,34 +801,6 @@ const Assets = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Status Update Dialog */}
-      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-        <DialogContent data-testid="status-dialog">
-          <DialogHeader>
-            <DialogTitle>Update Asset Status</DialogTitle>
-            <DialogDescription>
-              Change status for {selectedAsset?.asset_tag}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <Select value={statusUpdate} onValueChange={setStatusUpdate}>
-              <SelectTrigger data-testid="status-select">
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="available">Available</SelectItem>
-                <SelectItem value="in_use">In Use</SelectItem>
-                <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
-                <SelectItem value="disposed">Disposed</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleStatusUpdate} data-testid="confirm-status-btn">Update</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <ScanToAddDialog
         open={scanToAddOpen}
         onOpenChange={setScanToAddOpen}
@@ -1128,22 +989,6 @@ const Assets = () => {
           </form>
         </DialogContent>
       </Dialog>
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Asset</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete <strong>{assetToDelete?.asset_tag}</strong>? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDelete}>Delete</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <MasterQRDialog open={masterQrOpen} onOpenChange={setMasterQrOpen} assets={selectedAssetsForDispatch} onCreated={() => setSelectedIds([])} />
 
       {/* Bulk Edit Dialog */}
@@ -1221,143 +1066,6 @@ const Assets = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Edit Asset Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Asset — {editingAsset?.asset_tag}</DialogTitle>
-            <DialogDescription>Update any field for this asset</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Asset Tag</Label>
-                <Input value={editForm.asset_tag || ''} onChange={e => setEditForm({ ...editForm, asset_tag: e.target.value })} />
-              </div>
-              <div>
-                <Label>Serial Number</Label>
-                <Input value={editForm.serial_number || ''} onChange={e => setEditForm({ ...editForm, serial_number: e.target.value })} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Status</Label>
-                <Select value={editForm.status || 'available'} onValueChange={v => setEditForm({ ...editForm, status: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="available">Available</SelectItem>
-                    <SelectItem value="assigned">Assigned</SelectItem>
-                    <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
-                    <SelectItem value="retired">Retired</SelectItem>
-                    <SelectItem value="disposed">Disposed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Location</Label>
-                <Input value={editForm.location || ''} onChange={e => setEditForm({ ...editForm, location: e.target.value })} />
-              </div>
-            </div>
-            <div>
-              <Label>Department</Label>
-              <Select value={editForm.department_id || 'none'} onValueChange={v => setEditForm({ ...editForm, department_id: v === 'none' ? '' : v })}>
-                <SelectTrigger><SelectValue placeholder="No department" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No department</SelectItem>
-                  {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label>Purchase Date</Label>
-                <Input type="date" value={editForm.purchase_date || ''} onChange={e => setEditForm({ ...editForm, purchase_date: e.target.value })} />
-              </div>
-              <div>
-                <Label>Warranty Start</Label>
-                <Input type="date" value={editForm.warranty_start_date || ''} onChange={e => setEditForm({ ...editForm, warranty_start_date: e.target.value })} />
-              </div>
-              <div>
-                <Label>Warranty End</Label>
-                <Input type="date" value={editForm.warranty_end_date || ''} onChange={e => setEditForm({ ...editForm, warranty_end_date: e.target.value })} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Warranty Provider</Label>
-                <Input value={editForm.warranty_provider || ''} onChange={e => setEditForm({ ...editForm, warranty_provider: e.target.value })} />
-              </div>
-              <div>
-                <Label>Purchase Price (₹)</Label>
-                <Input type="number" min="0" value={editForm.purchase_price || 0} onChange={e => setEditForm({ ...editForm, purchase_price: parseFloat(e.target.value) || 0 })} />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label>Depreciation Method</Label>
-                <Select value={editForm.depreciation_method || 'straight_line'} onValueChange={v => setEditForm({ ...editForm, depreciation_method: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="straight_line">Straight Line</SelectItem>
-                    <SelectItem value="declining_balance">Declining Balance</SelectItem>
-                    <SelectItem value="none">None</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Depreciation Rate (%)</Label>
-                <Input type="number" min="0" max="100" value={editForm.depreciation_rate ?? 20} onChange={e => setEditForm({ ...editForm, depreciation_rate: parseFloat(e.target.value) || 0 })} />
-              </div>
-              <div>
-                <Label>Salvage Value (₹)</Label>
-                <Input type="number" min="0" value={editForm.salvage_value || 0} onChange={e => setEditForm({ ...editForm, salvage_value: parseFloat(e.target.value) || 0 })} />
-              </div>
-            </div>
-            <div>
-              <Label>Expiry Date</Label>
-              <Input type="date" value={editForm.expiry_date || ''} onChange={e => setEditForm({ ...editForm, expiry_date: e.target.value })} className="w-48" />
-            </div>
-            <div>
-              <Label>Ownership Type</Label>
-              <Select value={editForm.is_leased ? 'leased' : 'owned'} onValueChange={v => setEditForm({ ...editForm, is_leased: v === 'leased' })}>
-                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="owned">Owned</SelectItem>
-                  <SelectItem value="leased">Leased</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {editForm.is_leased && (
-              <div className="space-y-3 p-3 border border-primary/20 rounded-lg bg-primary/5">
-                <p className="text-xs font-semibold text-primary">Lease Details</p>
-                <div>
-                  <Label>Lessor Name</Label>
-                  <Input value={editForm.lessor_name || ''} onChange={e => setEditForm({ ...editForm, lessor_name: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label>Lease Start</Label>
-                    <Input type="date" value={editForm.lease_start_date || ''} onChange={e => setEditForm({ ...editForm, lease_start_date: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label>Lease End</Label>
-                    <Input type="date" value={editForm.lease_end_date || ''} onChange={e => setEditForm({ ...editForm, lease_end_date: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label>Monthly Payment (₹)</Label>
-                    <Input type="number" min="0" value={editForm.monthly_lease_payment || 0} onChange={e => setEditForm({ ...editForm, monthly_lease_payment: parseFloat(e.target.value) || 0 })} />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleEditSave}>Save Changes</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Import Assets Dialog */}
       <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
         <DialogContent className="max-w-md">
