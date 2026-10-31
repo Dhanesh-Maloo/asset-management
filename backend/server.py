@@ -1465,6 +1465,10 @@ async def _audit_user_name(user_id: Optional[str]) -> Optional[str]:
     return (u.get("name") or u.get("email")) if u else None
 
 
+def _tenant_scope(current_user) -> dict:
+    """Extra filter that limits a write to the caller's own tenant (nothing extra for super admin)."""
+    return {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+
 def _assert_same_tenant(current_user, record_tenant_id):
     """Non-super-admins may only act on records of their own tenant."""
     if current_user.role != UserRole.SUPER_ADMIN and record_tenant_id != current_user.tenant_id:
@@ -1832,7 +1836,14 @@ async def logout_oauth(request: Request, response: Response):
     return {"message": "Logged out successfully"}
 
 @api_router.post("/auth/register")
-async def register(user_data: UserCreate):
+async def register(user_data: UserCreate, current_user: User = Depends(get_current_user)):
+    # Creating accounts needs a signed-in admin. Public sign-up goes through /auth/signup, which makes its own tenant.
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if current_user.role != UserRole.SUPER_ADMIN:
+        if user_data.role == UserRole.SUPER_ADMIN:
+            raise HTTPException(status_code=403, detail="Access denied")
+        user_data.tenant_id = current_user.tenant_id
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -2112,13 +2123,12 @@ async def get_tenants(current_user: User = Depends(get_current_user)):
 
 @api_router.get("/tenants/{tenant_id}", response_model=Tenant)
 async def get_tenant(tenant_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != UserRole.SUPER_ADMIN and current_user.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    if current_user.role == UserRole.TENANT_ADMIN and current_user.tenant_id != tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+
     return Tenant(**tenant)
 
 @api_router.patch("/tenants/{tenant_id}", response_model=Tenant)
@@ -2764,8 +2774,8 @@ async def create_order(order_data: OrderCreate, current_user: User = Depends(get
     await check_tier_limit(current_user.tenant_id, "orders")
     if order_data.quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1")
-    prod = await db.products.find_one({"id": order_data.product_id, "is_deleted": {"$ne": True}}, {"_id": 0, "stock": 1})
-    if not prod:
+    prod = await db.products.find_one({"id": order_data.product_id, "is_deleted": {"$ne": True}}, {"_id": 0, "stock": 1, "tenant_id": 1})
+    if not prod or (current_user.role != UserRole.SUPER_ADMIN and prod.get("tenant_id") not in (None, "", current_user.tenant_id)):
         raise HTTPException(status_code=404, detail="Product not found")
     if order_data.quantity > prod.get("stock", 0):
         raise HTTPException(status_code=400, detail=f"Only {prod.get('stock', 0)} in stock")
@@ -3220,9 +3230,9 @@ async def delete_canned_reply(reply_id: str, current_user: User = Depends(get_cu
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     query = {}
-    if current_user.role in [UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
+    if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
-    
+
     # Independent counts run side by side: the call takes as long as the slowest one, not the sum of all of them.
     
     ticket_query = query.copy()
@@ -3845,10 +3855,8 @@ async def create_maintenance(maintenance_data: MaintenanceScheduleCreate, curren
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    asset = await db.assets.find_one({"id": maintenance_data.asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    
+    asset = await _get_asset_for_user(maintenance_data.asset_id, current_user)
+
     maintenance = MaintenanceSchedule(
         **maintenance_data.model_dump(),
         tenant_id=asset["tenant_id"]
@@ -3859,12 +3867,14 @@ async def create_maintenance(maintenance_data: MaintenanceScheduleCreate, curren
 @api_router.get("/maintenance", response_model=List[MaintenanceSchedule])
 async def get_maintenance_schedules(asset_id: Optional[str] = None, current_user: User = Depends(get_current_user)):
     query = {}
-    if current_user.role in [UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER, UserRole.HELPDESK_AGENT]:
+    if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
-    
+    if current_user.role == UserRole.EMPLOYEE:
+        query["assigned_to"] = current_user.id
+
     if asset_id:
         query["asset_id"] = asset_id
-    
+
     schedules = await db.maintenance_schedules.find(query, {"_id": 0}).to_list(1000)
     return [MaintenanceSchedule(**s) for s in schedules]
 
@@ -3876,7 +3886,8 @@ async def update_maintenance(maintenance_id: str, maintenance_update: Maintenanc
     maintenance = await db.maintenance_schedules.find_one({"id": maintenance_id}, {"_id": 0})
     if not maintenance:
         raise HTTPException(status_code=404, detail="Maintenance schedule not found")
-    
+    _assert_same_tenant(current_user, maintenance.get("tenant_id"))
+
     update_data = maintenance_update.model_dump(exclude_unset=True)
     await db.maintenance_schedules.update_one({"id": maintenance_id}, {"$set": update_data})
     
@@ -4009,12 +4020,14 @@ async def calculate_depreciation(asset_id: str, current_user: User = Depends(get
 # Warranty expiry check
 @api_router.get("/assets/warranty/expiring")
 async def get_expiring_warranties(days: int = 30, current_user: User = Depends(get_current_user)):
-    query = {}
-    if current_user.role in [UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query = {"is_deleted": {"$ne": True}}
+    if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
-    
+
     assets = await db.assets.find(query, {"_id": 0, "photo_url": 0}).to_list(1000)
-    
+
     expiring = []
     current_date = datetime.now(timezone.utc).date()
     threshold_date = current_date + timedelta(days=days)
@@ -4419,6 +4432,8 @@ async def delete_product(product_id: str, current_user: User = Depends(get_curre
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    if current_user.role != UserRole.SUPER_ADMIN and product.get("tenant_id") != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="You can only delete your organisation's products")
     # Soft delete
     await db.products.update_one({"id": product_id}, {"$set": {"is_deleted": True, "deleted_at": datetime.now(timezone.utc).isoformat()}})
     await write_audit_log(current_user.id, "delete", "product", product_id, tenant_id=current_user.tenant_id)
@@ -4445,6 +4460,7 @@ async def delete_ticket(ticket_id: str, current_user: User = Depends(get_current
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    _assert_same_tenant(current_user, ticket.get("tenant_id"))
     await db.tickets.delete_one({"id": ticket_id})
     await write_audit_log(current_user.id, "delete", "ticket", ticket_id, tenant_id=current_user.tenant_id)
     return {"message": "Ticket deleted successfully"}
@@ -4854,6 +4870,7 @@ async def delete_department(dept_id: str, current_user: User = Depends(get_curre
     dept = await db.departments.find_one({"id": dept_id}, {"_id": 0})
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
+    _assert_same_tenant(current_user, dept.get("tenant_id"))
     await db.departments.delete_one({"id": dept_id})
     return {"message": "Department deleted"}
 
@@ -4862,6 +4879,7 @@ async def get_department_stats(dept_id: str, current_user: User = Depends(get_cu
     dept = await db.departments.find_one({"id": dept_id}, {"_id": 0})
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
+    _assert_same_tenant(current_user, dept.get("tenant_id"))
     asset_count = await db.assets.count_documents({"department_id": dept_id, "is_deleted": {"$ne": True}})
     user_count = await db.users.count_documents({"department_id": dept_id})
     assets = await db.assets.find({"department_id": dept_id, "is_deleted": {"$ne": True}}, {"_id": 0, "purchase_price": 1}).to_list(5000)
@@ -5039,7 +5057,10 @@ async def change_password(req: ChangePasswordRequest, current_user: User = Depen
 async def create_location(loc: LocationCreate, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    location = Location(**loc.model_dump())
+    data = loc.model_dump()
+    if current_user.role != UserRole.SUPER_ADMIN:
+        data["tenant_id"] = current_user.tenant_id
+    location = Location(**data)
     await db.locations.insert_one(location.model_dump())
     return location
 
@@ -5054,7 +5075,7 @@ async def update_location(location_id: str, update: LocationUpdate, current_user
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     updates = {k: v for k, v in update.model_dump().items() if v is not None}
-    result = await db.locations.update_one({"id": location_id}, {"$set": updates})
+    result = await db.locations.update_one({"id": location_id, **_tenant_scope(current_user)}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Location not found")
     return {"message": "Location updated"}
@@ -5063,7 +5084,7 @@ async def update_location(location_id: str, update: LocationUpdate, current_user
 async def delete_location(location_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    result = await db.locations.delete_one({"id": location_id})
+    result = await db.locations.delete_one({"id": location_id, **_tenant_scope(current_user)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Location not found")
     return {"message": "Location deleted"}
@@ -5279,7 +5300,10 @@ async def delete_master_qr(master_id: str, current_user: User = Depends(get_curr
 async def create_vendor(vendor: VendorCreate, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    v = Vendor(**vendor.model_dump())
+    data = vendor.model_dump()
+    if current_user.role != UserRole.SUPER_ADMIN:
+        data["tenant_id"] = current_user.tenant_id
+    v = Vendor(**data)
     await db.vendors.insert_one(v.model_dump())
     return v
 
@@ -5294,7 +5318,7 @@ async def update_vendor(vendor_id: str, update: VendorUpdate, current_user: User
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     updates = {k: v for k, v in update.model_dump().items() if v is not None}
-    result = await db.vendors.update_one({"id": vendor_id}, {"$set": updates})
+    result = await db.vendors.update_one({"id": vendor_id, **_tenant_scope(current_user)}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return {"message": "Vendor updated"}
@@ -5303,7 +5327,7 @@ async def update_vendor(vendor_id: str, update: VendorUpdate, current_user: User
 async def delete_vendor(vendor_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    result = await db.vendors.delete_one({"id": vendor_id})
+    result = await db.vendors.delete_one({"id": vendor_id, **_tenant_scope(current_user)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return {"message": "Vendor deleted"}
@@ -5316,7 +5340,10 @@ async def delete_vendor(vendor_id: str, current_user: User = Depends(get_current
 async def create_license(lic: LicenseCreate, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    license_obj = SoftwareLicense(**lic.model_dump())
+    data = lic.model_dump()
+    if current_user.role != UserRole.SUPER_ADMIN:
+        data["tenant_id"] = current_user.tenant_id
+    license_obj = SoftwareLicense(**data)
     await db.licenses.insert_one(license_obj.model_dump())
     return license_obj
 
@@ -5335,7 +5362,7 @@ async def update_license(license_id: str, update: LicenseUpdate, current_user: U
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     updates = {k: v for k, v in update.model_dump().items() if v is not None}
-    result = await db.licenses.update_one({"id": license_id}, {"$set": updates})
+    result = await db.licenses.update_one({"id": license_id, **_tenant_scope(current_user)}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="License not found")
     return {"message": "License updated"}
@@ -5401,7 +5428,7 @@ async def seed_demo_licenses(current_user: User = Depends(get_current_user)):
 async def delete_license(license_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
-    result = await db.licenses.delete_one({"id": license_id})
+    result = await db.licenses.delete_one({"id": license_id, **_tenant_scope(current_user)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="License not found")
     return {"message": "License deleted"}
@@ -5442,7 +5469,7 @@ async def revoke_api_key(key_id: str, current_user: User = Depends(get_current_u
 @api_router.post("/reservations")
 async def create_reservation(res: ReservationCreate, current_user: User = Depends(get_current_user_hybrid)):
     asset = await db.assets.find_one({"id": res.asset_id, "is_deleted": {"$ne": True}})
-    if not asset:
+    if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Asset not found")
     if asset.get("status") not in ["available"]:
         raise HTTPException(status_code=400, detail="Asset is not available for reservation")
@@ -5471,6 +5498,7 @@ async def update_reservation(reservation_id: str, status: str, current_user: Use
     res = await db.reservations.find_one({"id": reservation_id})
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
+    _assert_same_tenant(current_user, res.get("tenant_id"))
     if status == "cancelled" and res["reserved_by"] != current_user.id:
         if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
             raise HTTPException(status_code=403, detail="Access denied")
@@ -5484,6 +5512,7 @@ async def delete_reservation(reservation_id: str, current_user: User = Depends(g
     res = await db.reservations.find_one({"id": reservation_id})
     if not res:
         raise HTTPException(status_code=404, detail="Reservation not found")
+    _assert_same_tenant(current_user, res.get("tenant_id"))
     if res["reserved_by"] != current_user.id and current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
     await db.reservations.delete_one({"id": reservation_id})
@@ -5493,11 +5522,17 @@ async def delete_reservation(reservation_id: str, current_user: User = Depends(g
 # TICKET COMMENTS
 # ═══════════════════════════════════════════════════════════════════════════
 
+async def _get_ticket_for_user(ticket_id: str, user: User) -> dict:
+    """Load a ticket the caller may see: own tenant only, and employees only the tickets they raised (else 404)."""
+    ticket = await db.tickets.find_one({"id": ticket_id})
+    if not ticket or (user.role != UserRole.SUPER_ADMIN and ticket.get("tenant_id") != user.tenant_id) \
+            or (user.role == UserRole.EMPLOYEE and ticket.get("created_by") != user.id):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return ticket
+
 @api_router.post("/tickets/{ticket_id}/comments")
 async def add_comment(ticket_id: str, body: TicketCommentCreate, current_user: User = Depends(get_current_user_hybrid)):
-    ticket = await db.tickets.find_one({"id": ticket_id})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _get_ticket_for_user(ticket_id, current_user)
     comment = TicketComment(
         ticket_id=ticket_id,
         author_id=current_user.id,
@@ -5510,11 +5545,13 @@ async def add_comment(ticket_id: str, body: TicketCommentCreate, current_user: U
 
 @api_router.get("/tickets/{ticket_id}/comments")
 async def get_comments(ticket_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    await _get_ticket_for_user(ticket_id, current_user)
     comments = await db.ticket_comments.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(500)
     return comments
 
 @api_router.delete("/tickets/{ticket_id}/comments/{comment_id}")
 async def delete_comment(ticket_id: str, comment_id: str, current_user: User = Depends(get_current_user_hybrid)):
+    await _get_ticket_for_user(ticket_id, current_user)
     comment = await db.ticket_comments.find_one({"id": comment_id, "ticket_id": ticket_id})
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -5530,8 +5567,13 @@ async def delete_comment(ticket_id: str, comment_id: str, current_user: User = D
 @api_router.post("/transfers")
 async def create_transfer(req: TransferCreate, current_user: User = Depends(get_current_user_hybrid)):
     asset = await db.assets.find_one({"id": req.asset_id, "is_deleted": {"$ne": True}})
-    if not asset:
+    if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Asset not found")
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER] and asset.get("assigned_to") != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only transfer assets assigned to you")
+    target = await db.users.find_one({"id": req.to_user_id}, {"_id": 0, "tenant_id": 1})
+    if not target or target.get("tenant_id") != asset.get("tenant_id"):
+        raise HTTPException(status_code=404, detail="Recipient user not found")
     transfer = AssetTransfer(
         asset_id=req.asset_id,
         asset_tag=asset.get("asset_tag", ""),
@@ -5564,6 +5606,12 @@ async def update_transfer(transfer_id: str, action: str, current_user: User = De
     transfer = await db.asset_transfers.find_one({"id": transfer_id})
     if not transfer:
         raise HTTPException(status_code=404, detail="Transfer not found")
+    _assert_same_tenant(current_user, transfer.get("tenant_id"))
+    is_manager = current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
+    if action in {"rejected", "completed"} and not is_manager:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if action == "cancelled" and not is_manager and transfer.get("requested_by") != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     updates: dict = {"status": action}
     if action == "approved":
         if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
@@ -5597,7 +5645,10 @@ async def update_transfer(transfer_id: str, action: str, current_user: User = De
 async def create_custom_field(field: CustomFieldCreate, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    cf = CustomField(**field.model_dump())
+    data = field.model_dump()
+    if current_user.role != UserRole.SUPER_ADMIN:
+        data["tenant_id"] = current_user.tenant_id
+    cf = CustomField(**data)
     await db.custom_fields.insert_one(cf.model_dump())
     return cf
 
@@ -5611,13 +5662,16 @@ async def list_custom_fields(current_user: User = Depends(get_current_user_hybri
 async def delete_custom_field(field_id: str, current_user: User = Depends(get_current_user_hybrid)):
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    result = await db.custom_fields.delete_one({"id": field_id})
+    result = await db.custom_fields.delete_one({"id": field_id, **_tenant_scope(current_user)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Custom field not found")
     return {"message": "Custom field deleted"}
 
 @api_router.put("/assets/{asset_id}/custom-values")
 async def set_custom_values(asset_id: str, values: dict, current_user: User = Depends(get_current_user_hybrid)):
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await _get_asset_for_user(asset_id, current_user)
     result = await db.assets.update_one({"id": asset_id}, {"$set": {"custom_values": values}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -6089,6 +6143,7 @@ async def complete_maintenance(
     maint = await db.maintenance_schedules.find_one({"id": maintenance_id})
     if not maint:
         raise HTTPException(status_code=404, detail="Maintenance record not found")
+    _assert_same_tenant(current_user, maint.get("tenant_id"))
     completed_date = datetime.now(timezone.utc).isoformat()
     await db.maintenance_schedules.update_one(
         {"id": maintenance_id},
@@ -6208,6 +6263,8 @@ async def check_serial_number(
 ):
     query = {"serial_number": {"$regex": f"^{re.escape(serial_number)}$", "$options": "i"}, "is_deleted": {"$ne": True}}
     if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+    elif tenant_id:
         query["tenant_id"] = tenant_id
     existing = await db.assets.find_one(query, {"_id": 0, "asset_tag": 1, "id": 1})
     if existing:
@@ -6837,6 +6894,12 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
         raise HTTPException(status_code=403, detail="Access denied")
     # For non-super-admin, force their own tenant
     tenant_id = invite_data.tenant_id if current_user.role == UserRole.SUPER_ADMIN else current_user.tenant_id
+    try:
+        invite_role = UserRole(invite_data.role)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if invite_role == UserRole.SUPER_ADMIN and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
     # Check if user with this email already exists
     existing_user = await db.users.find_one({"email": invite_data.email.lower()})
     if existing_user:
@@ -6845,7 +6908,7 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
     await db.invite_tokens.delete_many({"email": invite_data.email.lower(), "accepted": False})
     invite = InviteToken(
         email=invite_data.email.lower(),
-        role=invite_data.role,
+        role=invite_role.value,
         tenant_id=tenant_id,
         invited_by=current_user.id
     )
