@@ -77,8 +77,9 @@ const AssetDetail = () => {
 
   const fetchAssetDetails = async () => {
     try {
-      const [assetsRes, productsRes] = await Promise.all([
-        axios.get(`${API}/assets`, { params: { limit: 500 } }),
+      // Single-asset endpoint: only it returns photo_url (the list response leaves it out).
+      const [assetRes, productsRes] = await Promise.all([
+        axios.get(`${API}/assets/${assetId}`).catch((err) => (err.response?.status === 404 ? { data: null } : Promise.reject(err))),
         axios.get(`${API}/products`)
       ]);
       let maintenanceData = [];
@@ -90,7 +91,7 @@ const AssetDetail = () => {
       }
       const maintenanceRes = { data: maintenanceData };
       
-      const assetData = assetsRes.data.find(a => a.id === assetId);
+      const assetData = assetRes.data;
       if (!assetData) {
         toast.error('Asset not found');
         navigate('/assets');
