@@ -122,6 +122,13 @@ const Assets = () => {
       (async () => {
         if (user.role === 'employee') return;
         try {
+          const res = await cachedGet(axios, `${API}/locations`, {}, 120000);
+          setLocationOptions(res.data.map((l) => l.name).filter(Boolean));
+        } catch { /* locations are only a suggestion list */ }
+      })(),
+      (async () => {
+        if (user.role === 'employee') return;
+        try {
           const usersRes = await cachedGet(axios, `${API}/users`, {}, 60000);
           setUsers(usersRes.data);
         } catch {
@@ -408,6 +415,8 @@ const Assets = () => {
   const [masterQrOpen, setMasterQrOpen] = useState(false);
   const [bulkDispatchUserId, setBulkDispatchUserId] = useState('');
   const [bulkDispatchNotes, setBulkDispatchNotes] = useState('');
+  const [bulkDispatchLocation, setBulkDispatchLocation] = useState('');
+  const [locationOptions, setLocationOptions] = useState([]);
   const [bulkDispatching, setBulkDispatching] = useState(false);
 
   const toggleSelect = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -441,7 +450,8 @@ const Assets = () => {
       const res = await axios.post(`${API}/assets/bulk-dispatch`, {
         ids: selectedIds,
         assigned_to: bulkDispatchUserId,
-        notes: bulkDispatchNotes
+        notes: bulkDispatchNotes,
+        location: bulkDispatchLocation.trim()
       });
       toast.success(`${res.data.dispatched} unit(s) dispatched from store`);
       if (res.data.skipped?.length) toast.warning(`Skipped (no longer in store): ${res.data.skipped.join(', ')}`);
@@ -449,6 +459,7 @@ const Assets = () => {
       setBulkDispatchOpen(false);
       setBulkDispatchUserId('');
       setBulkDispatchNotes('');
+      setBulkDispatchLocation('');
       fetchData();
     } catch (e) { toast.error(e.response?.data?.detail || 'Dispatch failed'); }
     finally { setBulkDispatching(false); }
@@ -1075,6 +1086,19 @@ const Assets = () => {
               </Select>
             </div>
             <div>
+              <Label>Dispatch to (location / address)</Label>
+              <Input
+                list="bulk-dispatch-locations"
+                value={bulkDispatchLocation}
+                onChange={e => setBulkDispatchLocation(e.target.value)}
+                placeholder="e.g. Mumbai Office, 3rd Floor"
+                data-testid="bulk-dispatch-location"
+              />
+              <datalist id="bulk-dispatch-locations">
+                {locationOptions.map((name) => <option key={name} value={name} />)}
+              </datalist>
+            </div>
+            <div>
               <Label>Notes (optional)</Label>
               <Input value={bulkDispatchNotes} onChange={e => setBulkDispatchNotes(e.target.value)} placeholder="e.g. Handed over at Reception" />
             </div>
@@ -1082,7 +1106,7 @@ const Assets = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkDispatchOpen(false)}>Cancel</Button>
             <Button onClick={handleBulkDispatch} disabled={bulkDispatching} data-testid="confirm-bulk-dispatch-btn">
-              {bulkDispatching ? 'Dispatching...' : 'Confirm Dispatch'}
+              {bulkDispatching ? 'Dispatching...' : (bulkDispatchLocation.trim() ? `Dispatch to ${bulkDispatchLocation.trim()}` : 'Confirm Dispatch')}
             </Button>
           </DialogFooter>
         </DialogContent>

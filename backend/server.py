@@ -378,6 +378,8 @@ class Order(BaseModel):
     dispatched_at: Optional[str] = None
     dispatched_by: Optional[str] = None
     dispatched_location: Optional[str] = None
+    received_at: Optional[str] = None
+    received_by: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class OrderCreate(BaseModel):
@@ -835,6 +837,7 @@ class BulkAssetDispatch(BaseModel):
     ids: List[str]
     assigned_to: str
     notes: str = Field("", max_length=1000)
+    location: str = Field("", max_length=300)  # where the units are being sent (location name or address)
 
 class AssetDispose(BaseModel):
     disposal_method: str = Field(..., description="sold, scrapped, donated, or other")
@@ -3842,6 +3845,26 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
 
+@api_router.post("/orders/{order_id}/confirm-received", response_model=Order)
+async def confirm_order_received(order_id: str, current_user: User = Depends(get_current_user)):
+    """The person who raised the order (or a manager) confirms the dispatched unit has arrived."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order or (current_user.role != UserRole.SUPER_ADMIN and order.get("tenant_id") != current_user.tenant_id):
+        raise HTTPException(status_code=404, detail="Order not found")
+    is_manager = current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
+    if order.get("user_id") != current_user.id and not is_manager:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not order.get("dispatched_asset_id"):
+        raise HTTPException(status_code=400, detail="This order has not been dispatched yet")
+    if order.get("received_at"):
+        raise HTTPException(status_code=400, detail="Already confirmed as received")
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "received_at": datetime.now(timezone.utc).isoformat(), "received_by": current_user.id}})
+    await _record_history(order["dispatched_asset_id"], "received", current_user.id,
+                          f"Receipt confirmed for Order {order_id[:8]}", to_user_id=order.get("user_id"))
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return Order(**updated)
+
 @api_router.get("/approval-history/{entity_id}")
 async def get_approval_history(entity_id: str, current_user: User = Depends(get_current_user)):
     if current_user.role != UserRole.SUPER_ADMIN:
@@ -5736,10 +5759,14 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
         raise HTTPException(status_code=404, detail="Recipient user not found")
 
     now = datetime.now(timezone.utc).isoformat()
+    destination = body.location.strip()
+    claim_fields = {"assigned_to": body.assigned_to, "assigned_date": now, "status": AssetStatus.ASSIGNED}
+    if destination:
+        claim_fields["location"] = destination  # the units now live at the dispatch destination
     # Re-check availability in the write itself so two simultaneous dispatches cannot both claim a unit.
     await db.assets.update_many(
         {"id": {"$in": body.ids}, "status": AssetStatus.AVAILABLE, "is_deleted": {"$ne": True}},
-        {"$set": {"assigned_to": body.assigned_to, "assigned_date": now, "status": AssetStatus.ASSIGNED}}
+        {"$set": claim_fields}
     )
     claimed_ids = {a["id"] async for a in db.assets.find(
         {"id": {"$in": body.ids}, "assigned_to": body.assigned_to, "assigned_date": now}, {"_id": 0, "id": 1})}
@@ -5748,7 +5775,9 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
     if not dispatched:
         raise HTTPException(status_code=409, detail=f"Not in store (already dispatched/unavailable): {', '.join(skipped)}")
 
-    history_note = f"Dispatched from store to {recipient.get('name', body.assigned_to)}" + (f" — {body.notes}" if body.notes else "")
+    history_note = (f"Dispatched from store to {recipient.get('name', body.assigned_to)}"
+                    + (f" — destination: {destination}" if destination else "")
+                    + (f" — {body.notes}" if body.notes else ""))
     recipient_name = recipient.get("name") or recipient.get("email") or body.assigned_to
     await db.asset_history.insert_many([
         AssetHistory(asset_id=a["id"], action="dispatched", performed_by=current_user.id, notes=history_note,
@@ -5762,7 +5791,7 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
         await send_alert_email(
             recipient["email"],
             "📦 Assets Dispatched to You",
-            [f"{len(dispatched)} unit(s) dispatched: {tags}"],
+            [f"{len(dispatched)} unit(s) dispatched: {tags}"] + ([f"Destination: {destination}"] if destination else []),
             "The following assets have been dispatched to you from store:"
         )
 

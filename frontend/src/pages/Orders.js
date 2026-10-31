@@ -135,6 +135,28 @@ const Orders = () => {
     }
   };
 
+  const handleConfirmReceived = async (order) => {
+    try {
+      await axios.post(`${API}/orders/${order.id}/confirm-received`);
+      toast.success('Marked as received');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Could not confirm receipt');
+    }
+  };
+
+  // Where an order is on its way: requested -> approved -> dispatched -> received
+  const orderTrail = (order) => {
+    const approved = ['approved', 'fulfilled'].includes(order.status);
+    const dispatched = !!order.dispatched_asset_id || order.status === 'fulfilled';
+    return [
+      { label: 'Requested', done: true },
+      { label: 'Approved', done: approved },
+      { label: 'Dispatched', done: dispatched },
+      { label: 'Received', done: !!order.received_at },
+    ];
+  };
+
   const handleDispatch = async () => {
     if (!dispatchOrder) return;
     if (!dispatchLocation.trim()) {
@@ -425,6 +447,35 @@ const Orders = () => {
                         )}
                         <TableCell>
                           {getApprovalStageBadge(order)}
+                          {order.status !== 'rejected' && (
+                            <div className="mt-2 flex items-center gap-1 flex-wrap text-[11px]" data-testid={`order-trail-${order.id}`}>
+                              {orderTrail(order).map((step, i) => (
+                                <React.Fragment key={step.label}>
+                                  {i > 0 && <span className="text-muted-foreground">›</span>}
+                                  <span className={step.done ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-muted-foreground'}>
+                                    {step.done ? '✓ ' : ''}{step.label}
+                                  </span>
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          )}
+                          {order.status === 'fulfilled' && !order.received_at && (order.user_id === user.id || canManage) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="mt-2 h-7 text-xs"
+                              onClick={() => handleConfirmReceived(order)}
+                              data-testid={`confirm-received-${order.id}`}
+                            >
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Confirm received
+                            </Button>
+                          )}
+                          {order.received_at && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Received on {new Date(order.received_at).toLocaleDateString()}
+                            </div>
+                          )}
                           {order.status === 'fulfilled' && (order.dispatched_location || order.dispatched_asset_tag) && (
                             <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1" data-testid={`dispatch-info-${order.id}`}>
                               <Truck className="h-3 w-3 shrink-0" />
