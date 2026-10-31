@@ -3028,6 +3028,9 @@ async def assign_asset(asset_id: str, assignment: AssetAssign, current_user: Use
     asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     if not asset or (current_user.role != UserRole.SUPER_ADMIN and asset.get("tenant_id") != current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Asset not found")
+    recipient = await db.users.find_one({"id": assignment.assigned_to}, {"_id": 0, "tenant_id": 1})
+    if not recipient or recipient.get("tenant_id") != asset.get("tenant_id"):
+        raise HTTPException(status_code=404, detail="User not found")
     
     previous_holder = await _holder_of(asset)
     update_data = {
@@ -4411,7 +4414,7 @@ async def payment_success(request: Request):
                 )
         return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=success", status_code=302)
     else:
-        await db.invoices.update_one({"id": udf1}, {"$set": {"status": "failed"}})
+        await db.invoices.update_one({"id": udf1, "status": {"$ne": "paid"}}, {"$set": {"status": "failed"}})
         return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=failed", status_code=302)
 
 @api_router.post("/payments/failure")
@@ -4420,7 +4423,7 @@ async def payment_failure(request: Request):
     data = dict(form)
     udf1 = data.get('udf1', '')
     if udf1:
-        await db.invoices.update_one({"id": udf1}, {"$set": {"status": "failed"}})
+        await db.invoices.update_one({"id": udf1, "status": {"$ne": "paid"}}, {"$set": {"status": "failed"}})
     return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=failed", status_code=302)
 
 # ── DELETE endpoints ──────────────────────────────────────────────────────────
@@ -5351,7 +5354,10 @@ async def create_license(lic: LicenseCreate, current_user: User = Depends(get_cu
 async def list_licenses(current_user: User = Depends(get_current_user_hybrid)):
     query = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
     licenses = await db.licenses.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    can_see_keys = current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
     for lic in licenses:
+        if not can_see_keys:
+            lic.pop("license_key", None)
         over = (lic.get("seats_used") or 0) - (lic.get("seats_total") or 0)
         lic["over_used"] = over > 0
         lic["seats_over"] = max(over, 0)
