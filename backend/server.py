@@ -9,6 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import asyncio
+import time
 import contextvars
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict, TypeAdapter
@@ -937,6 +938,36 @@ def create_access_token(data: dict) -> str:
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
+# Every request has to know who is calling. Asking the database each time costs a full round trip (~0.2 s when
+# the database is remote), so the signed-in user is remembered briefly. A role change or deactivation can
+# therefore take up to this many seconds to apply; deleting a user or editing a profile clears the entry at once.
+_USER_CACHE_TTL_SECONDS = 30
+_USER_CACHE_MAX = 5000
+_user_cache: dict = {}
+
+def invalidate_user_cache(user_id: Optional[str] = None) -> None:
+    """Forget one remembered user (or all of them) so the next request reads fresh data."""
+    if user_id is None:
+        _user_cache.clear()
+    else:
+        _user_cache.pop(user_id, None)
+
+async def _user_by_id(user_id: str) -> Optional[User]:
+    """The signed-in user, from memory if it was read in the last few seconds. Returns a copy, so callers can't alter the cache."""
+    now = time.monotonic()
+    hit = _user_cache.get(user_id)
+    if hit and hit[0] > now:
+        return hit[1].model_copy(deep=True)
+    doc = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if doc is None:
+        _user_cache.pop(user_id, None)
+        return None
+    user = User(**doc)
+    if len(_user_cache) >= _USER_CACHE_MAX:
+        _user_cache.clear()
+    _user_cache[user_id] = (now + _USER_CACHE_TTL_SECONDS, user)
+    return user.model_copy(deep=True)
+
 async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -946,10 +977,10 @@ async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] =
         user_id = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        user = await _user_by_id(user_id)
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
-        return User(**user)
+        return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.JWTError:
@@ -979,9 +1010,9 @@ async def get_current_user_hybrid(request: Request):
             payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub")
             if user_id:
-                user = await db.users.find_one({"id": user_id}, {"_id": 0})
+                user = await _user_by_id(user_id)
                 if user:
-                    return User(**user)
+                    return user
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token has expired")
         except jwt.JWTError:
@@ -1007,9 +1038,9 @@ async def get_current_user_hybrid(request: Request):
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
             if expires_at >= datetime.now(timezone.utc):
-                user = await db.users.find_one({"id": session["user_id"]}, {"_id": 0})
+                user = await _user_by_id(session["user_id"])
                 if user:
-                    return User(**user)
+                    return user
             else:
                 await db.user_sessions.delete_one({"session_token": session_token})
 
@@ -2046,6 +2077,7 @@ async def reset_password(request: ResetPasswordRequest):
     
     hashed = hash_password(request.new_password)
     await db.users.update_one({"id": reset_record["user_id"]}, {"$set": {"password_hash": hashed}})
+    invalidate_user_cache(reset_record["user_id"])
     await db.password_resets.update_one({"token": request.token}, {"$set": {"used": True}})
     
     return {"message": "Password has been reset successfully"}
@@ -3404,6 +3436,7 @@ async def admin_set_password(user_id: str, data: AdminSetPassword, current_user:
     target = await _get_manageable_user(user_id, current_user)
     validate_password_strength(data.new_password)
     await db.users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(data.new_password)}})
+    invalidate_user_cache(user_id)
     await write_audit_log(current_user.id, "change_password", "user", user_id, f"Password set for {target['email']}", tenant_id=target.get("tenant_id"))
     return {"message": "Password updated"}
 
@@ -3447,6 +3480,7 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
             raise HTTPException(status_code=403, detail="Cannot delete admin accounts")
 
     await db.users.delete_one({"id": user_id})
+    invalidate_user_cache(user_id)
     return {"message": "User deleted successfully"}
 
 # Group endpoints
@@ -4980,6 +5014,7 @@ async def update_profile(update: ProfileUpdate, current_user: User = Depends(get
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     await db.users.update_one({"id": current_user.id}, {"$set": updates})
+    invalidate_user_cache(current_user.id)
     return {"message": "Profile updated"}
 
 @api_router.put("/auth/change-password")
@@ -4992,6 +5027,7 @@ async def change_password(req: ChangePasswordRequest, current_user: User = Depen
     validate_password_strength(req.new_password)
     new_hash = hash_password(req.new_password)
     await db.users.update_one({"id": current_user.id}, {"$set": {"password_hash": new_hash}})
+    invalidate_user_cache(current_user.id)
     await write_audit_log(current_user.id, "change_password", "user", current_user.id, tenant_id=current_user.tenant_id)
     return {"message": "Password changed successfully"}
 
