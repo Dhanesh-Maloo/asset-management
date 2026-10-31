@@ -5,6 +5,7 @@ import secrets
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -1525,7 +1526,15 @@ def validate_password_strength(password: str):
         raise HTTPException(status_code=400, detail="Password must contain at least one number")
 
 # Create the main app
-app = FastAPI()
+# orjson writes JSON several times faster than the standard library. If it is not installed the app still
+# works, it just falls back to the standard JSON response.
+try:
+    import orjson  # noqa: F401
+    from fastapi.responses import ORJSONResponse as _DefaultResponse
+except ImportError:
+    from fastapi.responses import JSONResponse as _DefaultResponse
+
+app = FastAPI(default_response_class=_DefaultResponse)
 api_router = APIRouter(prefix="/api")
 
 # Health check endpoint
@@ -6965,6 +6974,9 @@ async def audit_trail_middleware(request: Request, call_next):
         except Exception as exc:  # never break a request because auditing failed
             logging.warning(f"Audit trail skipped: {exc}")
     return response
+
+# Compress responses over 500 bytes (JSON shrinks roughly 5-10x). Added before CORS so CORS stays the outermost layer.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.add_middleware(
     CORSMiddleware,
