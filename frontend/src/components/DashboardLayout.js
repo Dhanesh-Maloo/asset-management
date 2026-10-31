@@ -35,11 +35,12 @@ const DashboardLayout = ({ children }) => {
   }, [darkMode]);
 
   useEffect(() => {
-    if (user) fetchNotifications();
+    // The bell is secondary: wait a moment on first load so the page's own data gets the connection first.
+    const first = user ? setTimeout(fetchNotifications, notificationCache.length ? 0 : 1500) : null;
     const interval = setInterval(() => { if (user) fetchNotifications(); }, 60000);
     const onFocus = () => { if (user && document.visibilityState === 'visible') fetchNotifications(); };
     document.addEventListener('visibilitychange', onFocus);
-    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onFocus); };
+    return () => { clearTimeout(first); clearInterval(interval); document.removeEventListener('visibilitychange', onFocus); };
   }, [user]);
 
   useEffect(() => {

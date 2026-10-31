@@ -4457,53 +4457,48 @@ async def delete_order(order_id: str, current_user: User = Depends(get_current_u
 
 # ── Feature 1: Notifications endpoint ────────────────────────────────────────
 
+async def _zero() -> int:
+    """Stand-in for a count that does not apply to this user, so it can sit inside asyncio.gather."""
+    return 0
+
 @api_router.get("/notifications")
 async def get_notifications(current_user: User = Depends(get_current_user)):
-    notifications = []
     tenant_id = current_user.tenant_id
+    tenant = {"tenant_id": tenant_id} if tenant_id else {}
+    is_manager = current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]
 
-    # Pending orders awaiting approval (for admins/managers)
-    if current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
-        query = {"status": "pending"}
-        if tenant_id:
-            query["tenant_id"] = tenant_id
-        pending_count = await db.orders.count_documents(query)
-        if pending_count > 0:
-            notifications.append({
-                "type": "pending_order",
-                "message": f"{pending_count} order{'s' if pending_count > 1 else ''} awaiting approval",
-                "count": pending_count,
-                "link": "/orders"
-            })
+    # warranty_end_date is stored either as a full ISO datetime or as YYYY-MM-DD. Both begin with the date, so a plain
+    # string range does the "next 30 days" test inside the database and no asset has to be loaded to be counted.
+    today = datetime.now(timezone.utc).date()
+    warranty_from = today.isoformat()
+    warranty_to = (today + timedelta(days=31)).isoformat()  # exclusive: the day after the 30-day window
 
-    # Expiring warranties (within 30 days)
-    if current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
-        asset_query = {"is_deleted": {"$ne": True}}
-        if tenant_id:
-            asset_query["tenant_id"] = tenant_id
-        assets = await db.assets.find(asset_query, {"_id": 0, "warranty_end_date": 1}).to_list(5000)
-        today = datetime.now(timezone.utc).date()
-        threshold = today + timedelta(days=30)
-        # _to_date copes with both full ISO datetimes and plain YYYY-MM-DD (the Edit form saves the latter)
-        expiring = sum(
-            1 for a in assets
-            if (end := _to_date(a.get("warranty_end_date"))) and today <= end <= threshold
-        )
-        if expiring > 0:
-            notifications.append({
-                "type": "expiring_warranty",
-                "message": f"{expiring} warranty{'s' if expiring > 1 else ''} expiring within 30 days",
-                "count": expiring,
-                "link": "/assets"
-            })
+    # All four counts are independent, so they run at the same time instead of one after another.
+    pending_count, expiring, overdue, my_tickets = await asyncio.gather(
+        db.orders.count_documents({"status": "pending", **tenant}) if is_manager else _zero(),
+        db.assets.count_documents({"is_deleted": {"$ne": True}, **tenant,
+                                   "warranty_end_date": {"$gte": warranty_from, "$lt": warranty_to}}) if is_manager else _zero(),
+        # tenant-wide, so admins/managers only
+        db.maintenance_schedules.count_documents({"status": "overdue", **tenant}) if is_manager else _zero(),
+        db.tickets.count_documents({"assigned_to": current_user.id, "status": {"$in": ["open", "in_progress"]}})
+        if current_user.role in [UserRole.HELPDESK_AGENT, UserRole.ASSET_MANAGER] else _zero(),
+    )
 
-    # Overdue maintenance (admins/managers only; it is tenant-wide)
-    overdue = 0
-    if current_user.role in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
-        maint_query = {"status": "overdue"}
-        if tenant_id:
-            maint_query["tenant_id"] = tenant_id
-        overdue = await db.maintenance_schedules.count_documents(maint_query)
+    notifications = []
+    if pending_count > 0:
+        notifications.append({
+            "type": "pending_order",
+            "message": f"{pending_count} order{'s' if pending_count > 1 else ''} awaiting approval",
+            "count": pending_count,
+            "link": "/orders"
+        })
+    if expiring > 0:
+        notifications.append({
+            "type": "expiring_warranty",
+            "message": f"{expiring} warranty{'s' if expiring > 1 else ''} expiring within 30 days",
+            "count": expiring,
+            "link": "/assets"
+        })
     if overdue > 0:
         notifications.append({
             "type": "overdue_maintenance",
@@ -4511,21 +4506,13 @@ async def get_notifications(current_user: User = Depends(get_current_user)):
             "count": overdue,
             "link": "/assets"
         })
-
-    # Open tickets assigned to me
-    if current_user.role in [UserRole.HELPDESK_AGENT, UserRole.ASSET_MANAGER]:
-        my_tickets = await db.tickets.count_documents({
-            "assigned_to": current_user.id,
-            "status": {"$in": ["open", "in_progress"]}
+    if my_tickets > 0:
+        notifications.append({
+            "type": "assigned_ticket",
+            "message": f"{my_tickets} ticket{'s' if my_tickets > 1 else ''} assigned to you",
+            "count": my_tickets,
+            "link": "/tickets"
         })
-        if my_tickets > 0:
-            notifications.append({
-                "type": "assigned_ticket",
-                "message": f"{my_tickets} ticket{'s' if my_tickets > 1 else ''} assigned to you",
-                "count": my_tickets,
-                "link": "/tickets"
-            })
-
     return notifications
 
 # ── Feature 1: Email alerts trigger ──────────────────────────────────────────
