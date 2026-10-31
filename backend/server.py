@@ -42,7 +42,8 @@ _validate_env()
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+# minPoolSize keeps a few connections open so a request after a quiet spell does not wait for a new handshake to Atlas
+client = AsyncIOMotorClient(mongo_url, minPoolSize=5, maxPoolSize=50, maxIdleTimeMS=300000)
 db = client[os.environ['DB_NAME']]
 
 # Security
@@ -3006,7 +3007,7 @@ async def get_assets(
         ]
 
     skip = (page - 1) * limit
-    assets = await db.assets.find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    assets = await db.assets.find(query, {"_id": 0, "photo_url": 0}).skip(skip).limit(limit).to_list(limit)
     return [Asset(**a) for a in assets]
 
 @api_router.patch("/assets/{asset_id}/assign", response_model=Asset)
@@ -4012,7 +4013,7 @@ async def get_expiring_warranties(days: int = 30, current_user: User = Depends(g
     if current_user.role in [UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         query["tenant_id"] = current_user.tenant_id
     
-    assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(query, {"_id": 0, "photo_url": 0}).to_list(1000)
     
     expiring = []
     current_date = datetime.now(timezone.utc).date()
@@ -4546,7 +4547,7 @@ async def trigger_email_alerts(current_user: User = Depends(get_current_user)):
     asset_query = {"is_deleted": {"$ne": True}}
     if tenant_id:
         asset_query["tenant_id"] = tenant_id
-    assets = await db.assets.find(asset_query, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(asset_query, {"_id": 0, "photo_url": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
     today = now.date()
     threshold = today + timedelta(days=30)
@@ -4922,7 +4923,7 @@ async def export_assets_csv(current_user: User = Depends(get_current_user)):
     if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
 
-    assets = await db.assets.find(query, {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(query, {"_id": 0, "photo_url": 0}).to_list(10000)
 
     import io, csv as csv_module
     output = io.StringIO()
@@ -4997,7 +4998,7 @@ async def get_audit_log(
 async def get_profile(current_user: User = Depends(get_current_user_hybrid)):
     """Return current user profile with assigned assets, open tickets, recent orders."""
     user_doc = await db.users.find_one({"id": current_user.id}, {"_id": 0, "password_hash": 0})
-    assets = await db.assets.find({"assigned_to": current_user.id, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(100)
+    assets = await db.assets.find({"assigned_to": current_user.id, "is_deleted": {"$ne": True}}, {"_id": 0, "photo_url": 0}).to_list(100)
     tickets = await db.tickets.find({"created_by": current_user.id, "status": {"$in": ["open", "in_progress"]}}, {"_id": 0}).sort("created_at", -1).to_list(20)
     orders = await db.orders.find({"user_id": current_user.id}, {"_id": 0}).sort("created_at", -1).to_list(20)
     return {
@@ -5660,7 +5661,7 @@ async def bulk_dispatch_assets(body: BulkAssetDispatch, current_user: User = Dep
     if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
 
-    assets = await db.assets.find(query, {"_id": 0}).to_list(len(body.ids))
+    assets = await db.assets.find(query, {"_id": 0, "photo_url": 0}).to_list(len(body.ids))
     found_ids = {a["id"] for a in assets}
     missing = [i for i in body.ids if i not in found_ids]
     if missing:
@@ -5981,7 +5982,7 @@ async def report_asset_depreciation(current_user: User = Depends(get_current_use
         raise HTTPException(status_code=403, detail="Access denied")
     tenant_q = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
     # Include assets even without purchase_price so report is never empty
-    assets = await db.assets.find({**tenant_q, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find({**tenant_q, "is_deleted": {"$ne": True}}, {"_id": 0, "photo_url": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
     result = []
     for a in assets:
@@ -6380,7 +6381,7 @@ async def export_assets_xlsx(current_user: User = Depends(get_current_user_hybri
     query: dict = {"is_deleted": {"$ne": True}}
     if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
-    assets = await db.assets.find(query, {"_id": 0}).to_list(5000)
+    assets = await db.assets.find(query, {"_id": 0, "photo_url": 0}).to_list(5000)
     products_raw = await db.products.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
     products_map = {p["id"]: p["name"] for p in products_raw}
 
@@ -6993,6 +6994,43 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Almost every endpoint looks a record up by its own "id" field, and the list pages filter by tenant plus status or
+# department. Without these the database reads whole collections to answer each request. Non-unique on purpose: an
+# existing duplicate must never stop the server from starting.
+_EXTRA_INDEXES = [
+    ("assets", [("id", 1)]),
+    ("assets", [("tenant_id", 1), ("is_deleted", 1), ("status", 1)]),
+    ("assets", [("tenant_id", 1), ("department_id", 1)]),
+    ("assets", [("tenant_id", 1), ("product_id", 1)]),
+    ("assets", [("tenant_id", 1), ("asset_tag", 1)]),
+    ("assets", [("department_id", 1)]),
+    ("assets", [("warranty_end_date", 1)]),
+    ("users", [("id", 1)]),
+    ("products", [("id", 1)]),
+    ("orders", [("id", 1)]),
+    ("orders", [("tenant_id", 1), ("status", 1)]),
+    ("orders", [("tenant_id", 1), ("created_at", -1)]),
+    ("tickets", [("id", 1)]),
+    ("tickets", [("tenant_id", 1), ("status", 1)]),
+    ("tickets", [("tenant_id", 1), ("created_at", -1)]),
+    ("tickets", [("assigned_to", 1), ("status", 1)]),
+    ("departments", [("id", 1)]),
+    ("tenants", [("id", 1)]),
+    ("maintenance_schedules", [("tenant_id", 1), ("status", 1)]),
+    ("audit_log", [("tenant_id", 1), ("timestamp", -1)]),
+    ("asset_history", [("asset_id", 1), ("date", 1)]),
+]
+
+async def _ensure_extra_indexes():
+    """Build the indexes above in the background, so they never delay startup or fail it."""
+    async def one(collection, keys):
+        try:
+            await db[collection].create_index(keys, background=True)
+        except Exception as e:
+            logger.warning("Index %s %s skipped: %s", collection, keys, e)
+    await asyncio.gather(*(one(c, k) for c, k in _EXTRA_INDEXES))
+    logger.info("Extra indexes ensured (%d)", len(_EXTRA_INDEXES))
+
 @app.on_event("startup")
 async def startup_db_client():
     """Create database indexes for fast queries."""
@@ -7040,6 +7078,7 @@ async def startup_db_client():
     await db.expiry_alerts_sent.create_index("key", unique=True, background=True)
     await db.canned_replies.create_index("tenant_id", background=True)
     await _backfill_ticket_sla()
+    asyncio.create_task(_ensure_extra_indexes())
     asyncio.create_task(run_nightly_product_backup())
     # Patch prices onto existing tiers that pre-date the price_monthly field
     tier_prices = {"tier-free": 0.0, "tier-pro": 999.0, "tier-enterprise": 2999.0}
