@@ -10,9 +10,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package, KeyRound, Upload } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package, KeyRound, Upload, UserMinus } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmployeeAssetsDialog } from '../components/EmployeeAssetsDialog';
+import { OffboardDialog } from '../components/OffboardDialog';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -34,6 +35,7 @@ const Users = () => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [assetCounts, setAssetCounts] = useState({});
   const [assetsFor, setAssetsFor] = useState(null);
+  const [offboardFor, setOffboardFor] = useState(null);
 
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState(null);
@@ -245,6 +247,14 @@ const Users = () => {
     }
   };
 
+  // Managers can take assets back from anyone in their tenant except admins (only a super admin offboards those)
+  const canOffboard = (u) => {
+    if (user.id === u.id || u.status === 'inactive') return false;
+    if (user.role === 'super_admin') return true;
+    if (!['tenant_admin', 'asset_manager'].includes(user.role)) return false;
+    return u.role !== 'tenant_admin' && u.role !== 'super_admin';
+  };
+
   const canDeleteUser = (u) => {
     if (user.id === u.id) return false;
     if (user.role === 'super_admin') return true;
@@ -342,7 +352,7 @@ const Users = () => {
                           </TableCell>
                         )}
                         <TableCell>
-                          <Badge variant="outline" className="gap-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 font-medium">
+                          <Badge variant="outline" className={`gap-1.5 font-medium ${u.status === 'inactive' ? 'bg-muted text-muted-foreground border-border' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20'}`}>
                             <span className="h-1.5 w-1.5 rounded-full bg-current" />
                             {u.status}
                           </Badge>
@@ -360,6 +370,12 @@ const Users = () => {
                             <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => openPasswordDialog(u)} data-testid={`password-btn-${u.id}`}>
                               <KeyRound className="h-3.5 w-3.5 mr-1.5" />
                               Password
+                            </Button>
+                          )}
+                          {canOffboard(u) && (
+                            <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => setOffboardFor(u)} data-testid={`offboard-btn-${u.id}`}>
+                              <UserMinus className="h-3.5 w-3.5 mr-1.5" />
+                              Offboard
                             </Button>
                           )}
                           {canDeleteUser(u) && (
@@ -416,6 +432,12 @@ const Users = () => {
       </div>
 
       <EmployeeAssetsDialog employee={assetsFor} onClose={() => setAssetsFor(null)} />
+      <OffboardDialog
+        employee={offboardFor}
+        canDeactivate={['super_admin', 'tenant_admin'].includes(user.role)}
+        onClose={() => setOffboardFor(null)}
+        onDone={fetchData}
+      />
 
       {/* Invite User Dialog */}
       <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) { setInviteResult(null); } }}>

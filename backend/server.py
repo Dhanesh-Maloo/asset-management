@@ -968,6 +968,9 @@ async def _user_by_id(user_id: str) -> Optional[User]:
         _user_cache.pop(user_id, None)
         return None
     user = User(**doc)
+    if user.status == "inactive":  # offboarded: existing tokens stop working straight away
+        _user_cache.pop(user_id, None)
+        return None
     if len(_user_cache) >= _USER_CACHE_MAX:
         _user_cache.clear()
     _user_cache[user_id] = (now + _USER_CACHE_TTL_SECONDS, user)
@@ -988,13 +991,13 @@ async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] =
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.JWTError:
+    except jwt.PyJWTError:
         # Try as API key
         token = credentials.credentials
         api_key = await db.api_keys.find_one({"key": token, "is_active": True}, {"_id": 0})
         if api_key:
             user = await db.users.find_one({"id": api_key["user_id"]}, {"_id": 0})
-            if user:
+            if user and user.get("status") != "inactive":
                 await db.api_keys.update_one(
                     {"key": token},
                     {"$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}}
@@ -1020,12 +1023,12 @@ async def get_current_user_hybrid(request: Request):
                     return user
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token has expired")
-        except jwt.JWTError:
+        except jwt.PyJWTError:
             # Try as API key
             api_key = await db.api_keys.find_one({"key": token, "is_active": True}, {"_id": 0})
             if api_key:
                 user = await db.users.find_one({"id": api_key["user_id"]}, {"_id": 0})
-                if user:
+                if user and user.get("status") != "inactive":
                     await db.api_keys.update_one(
                         {"key": token},
                         {"$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}}
@@ -1964,6 +1967,8 @@ async def login(credentials: UserLogin, request: Request, response: Response):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user or not verify_password(credentials.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if user.get("status") == "inactive":
+        raise HTTPException(status_code=403, detail="This account has been deactivated. Contact your administrator.")
 
     # Clear any stale Google OAuth session cookie so the new JWT takes full control
     old_session = request.cookies.get("session_token")
@@ -4206,6 +4211,91 @@ async def delete_audit(audit_id: str, current_user: User = Depends(get_current_u
     await _get_audit_for_user(audit_id, current_user)
     await db.stock_audits.delete_one({"id": audit_id})
     return {"message": "Stock-take deleted"}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EMPLOYEE EXIT CHECKLIST (take back assets, then optionally deactivate the account)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class OffboardRequest(BaseModel):
+    returned_asset_ids: List[str] = []
+    location: str = Field("", max_length=300)  # where the returned units are stored now
+    notes: str = Field("", max_length=1000)
+    deactivate: bool = False
+    force: bool = False  # deactivate even though some assets were not handed back
+
+async def _offboarding_target(user_id: str, current_user: User) -> dict:
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    target = await _scoped_employee(user_id, current_user)
+    if target["id"] == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot offboard yourself")
+    if target.get("role") in ("super_admin", "tenant_admin") and current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only a super admin can offboard an admin account")
+    return target
+
+@api_router.get("/users/{user_id}/offboarding")
+async def get_offboarding_checklist(user_id: str, current_user: User = Depends(get_current_user)):
+    """Everything still tied to this person: assets they hold, open tickets, open orders and reservations."""
+    target = await _offboarding_target(user_id, current_user)
+    tenant = _tenant_scope(current_user)
+    assets = await db.assets.find({**tenant, **_held_query(user_id)},
+                                  {"_id": 0, "id": 1, "asset_tag": 1, "serial_number": 1, "status": 1, "product_id": 1,
+                                   "location": 1, "expected_return_date": 1}).to_list(500)
+    product_ids = list({a.get("product_id") for a in assets if a.get("product_id")})
+    names = {p["id"]: p.get("name", "") for p in await db.products.find(
+        {"id": {"$in": product_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(len(product_ids) or 1)}
+    open_tickets, open_orders, open_reservations = await asyncio.gather(
+        db.tickets.count_documents({**tenant, "assigned_to": user_id, "status": {"$in": ["open", "in_progress"]}}),
+        db.orders.count_documents({**tenant, "user_id": user_id, "status": {"$in": ["pending", "approved"]}}),
+        db.reservations.count_documents({**tenant, "reserved_by": user_id, "status": {"$in": ["pending", "approved"]}}),
+    )
+    return {
+        "user": {"id": target["id"], "name": target.get("name"), "email": target.get("email"),
+                 "role": target.get("role"), "status": target.get("status", "active")},
+        "assets": [{**a, "product_name": names.get(a.get("product_id"), "")} for a in assets],
+        "open_tickets": open_tickets, "open_orders": open_orders, "open_reservations": open_reservations,
+    }
+
+@api_router.post("/users/{user_id}/offboard")
+async def offboard_user(user_id: str, body: OffboardRequest, current_user: User = Depends(get_current_user)):
+    """Take back the ticked assets (they return to store), and optionally deactivate the account."""
+    target = await _offboarding_target(user_id, current_user)
+    if body.deactivate and current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Only an admin can deactivate an account")
+    tenant = _tenant_scope(current_user)
+    now = datetime.now(timezone.utc).isoformat()
+    destination = body.location.strip()
+
+    returned, skipped = [], []
+    for asset_id in dict.fromkeys(body.returned_asset_ids):
+        fields = {"status": AssetStatus.AVAILABLE, "actual_return_date": now}
+        if destination:
+            fields["location"] = destination
+        # The held-by-this-user filter is part of the write, so an asset someone else just took is never reset.
+        asset = await db.assets.find_one_and_update(
+            {**tenant, **_held_query(user_id), "id": asset_id},
+            {"$set": fields, "$unset": {"assigned_to": "", "checked_out_to": "", "expected_return_date": ""}},
+            projection={"_id": 0, "id": 1, "asset_tag": 1})
+        if asset is None:
+            skipped.append(asset_id)
+            continue
+        returned.append(asset)
+        await _record_history(asset["id"], "returned", current_user.id,
+                              f"Taken back at offboarding of {target.get('name') or user_id}" + (f" — {body.notes}" if body.notes else ""),
+                              from_user_id=user_id)
+
+    remaining = await db.assets.find({**tenant, **_held_query(user_id)}, {"_id": 0, "asset_tag": 1}).to_list(500)
+    if body.deactivate:
+        if remaining and not body.force:
+            raise HTTPException(status_code=409, detail="Still holding: " + ", ".join(a.get("asset_tag", "?") for a in remaining)
+                                + ". Take them back first, or choose to deactivate anyway.")
+        await db.users.update_one({"id": user_id}, {"$set": {"status": "inactive"}})
+        invalidate_user_cache(user_id)
+    await write_audit_log(current_user.id, "offboard", "user", user_id,
+                          f"{len(returned)} asset(s) taken back, {len(remaining)} still held" + (", account deactivated" if body.deactivate else ""),
+                          tenant_id=current_user.tenant_id)
+    return {"returned": len(returned), "skipped": skipped, "still_holding": [a.get("asset_tag") for a in remaining],
+            "deactivated": bool(body.deactivate)}
 
 @api_router.get("/assets/warranty/expiring")
 async def get_expiring_warranties(days: int = 30, current_user: User = Depends(get_current_user)):
