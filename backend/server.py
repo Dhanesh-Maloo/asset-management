@@ -17,6 +17,9 @@ from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict, Ty
 from typing import Dict, List, Optional
 import uuid
 import re
+import email_templates
+import mailer
+import notifications
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
@@ -53,12 +56,7 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production'
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
-# Email (Zoho ZeptoMail HTTP API). Use the API URL of your ZeptoMail region
-# (api.zeptomail.com / .in / .eu / .com.au / .jp) and a FROM_EMAIL on a verified domain.
-ZEPTOMAIL_TOKEN = os.environ.get('ZEPTOMAIL_TOKEN', '')
-ZEPTOMAIL_API_URL = os.environ.get('ZEPTOMAIL_API_URL', 'https://api.zeptomail.com/v1.1/email')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', '')
-FROM_NAME = os.environ.get('FROM_NAME', 'Asset Management')
+# Email: see mailer.py (Zoho ZeptoMail). Env vars: ZEPTOMAIL_TOKEN, ZEPTOMAIL_API_URL.
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
 
@@ -1054,91 +1052,17 @@ async def get_current_user_hybrid(request: Request):
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 
-# ── Helper: send email via Zoho ZeptoMail HTTP API ───────────────────────────
-def _zeptomail_auth_header() -> str:
-    """ZeptoMail shows the token either with or without its 'Zoho-enctoken' prefix; accept both."""
-    token = ZEPTOMAIL_TOKEN.strip()
-    return token if token.lower().startswith("zoho-enctoken") else f"Zoho-enctoken {token}"
-
-async def _send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Send email via the ZeptoMail HTTP API (port 443)."""
-    if not ZEPTOMAIL_TOKEN or not FROM_EMAIL:
-        logging.warning("ZeptoMail not configured (ZEPTOMAIL_TOKEN / FROM_EMAIL) — skipping email")
-        return False
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            ZEPTOMAIL_API_URL,
-            headers={"Authorization": _zeptomail_auth_header(), "Accept": "application/json", "Content-Type": "application/json"},
-            json={
-                "from": {"address": FROM_EMAIL, "name": FROM_NAME},
-                "to": [{"email_address": {"address": to_email}}],
-                "subject": subject,
-                "htmlbody": html_body,
-            },
-        )
-        if not resp.is_success:
-            raise Exception(f"ZeptoMail API error {resp.status_code}: {resp.text}")
-    logging.info(f"Email '{subject}' sent to {to_email} via ZeptoMail")
-    return True
-
-
+# ── Email helpers (transport in mailer.py, content in email_templates.py) ─────
 async def send_reset_email(to_email: str, reset_token: str, user_name: str = "") -> bool:
-    reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
-    greeting = f"Hello {user_name}," if user_name else "Hello,"
-    html_body = f"""
-    <html>
-      <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
-        <h2 style="color:#4F46E5;">Password Reset Request</h2>
-        <p>{greeting}</p>
-        <p>We received a request to reset your password for your Asset Management account.</p>
-        <p style="margin:24px 0;">
-          <a href="{reset_link}"
-             style="background:#4F46E5;color:#fff;padding:12px 28px;text-decoration:none;
-                    border-radius:6px;display:inline-block;font-weight:bold;">
-            Reset Password
-          </a>
-        </p>
-        <p style="color:#6B7280;font-size:14px;">
-          Or paste this link into your browser:<br/>
-          <a href="{reset_link}" style="color:#4F46E5;">{reset_link}</a>
-        </p>
-        <p style="color:#6B7280;font-size:13px;">
-          This link expires in <strong>1 hour</strong>. If you did not request a password
-          reset, you can safely ignore this email.
-        </p>
-      </body>
-    </html>"""
-    try:
-        return await _send_email(to_email, "Password Reset Request", html_body)
-    except Exception as e:
-        logging.error(f"Failed to send reset email to {to_email}: {e}")
-        return False
+    """Send the password-reset link. Returns False if the email could not be sent."""
+    subject, html_body, text_body = email_templates.password_reset(user_name, f"{FRONTEND_URL}/reset-password?token={reset_token}")
+    return await mailer.send_mail(to=to_email, name=user_name, subject=subject, html=html_body, text=text_body)
 
 
 async def send_alert_email(to_email: str, subject: str, items: list, intro: str = "") -> bool:
-    rows = "".join(
-        f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{item}</td></tr>"
-        for item in items
-    )
-    html_body = f"""
-    <html>
-      <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
-        <h2 style="color:#4F46E5;">Asset Management — Alert</h2>
-        <h3>{subject}</h3>
-        {f'<p>{intro}</p>' if intro else ''}
-        <table style="width:100%;border-collapse:collapse;margin-top:12px;">
-          {rows}
-        </table>
-        <p style="color:#6B7280;font-size:13px;margin-top:24px;">
-          Log in to <a href="{FRONTEND_URL}" style="color:#4F46E5;">Asset Management</a> to take action.
-        </p>
-      </body>
-    </html>"""
-    try:
-        return await _send_email(to_email, subject, html_body)
-    except Exception as e:
-        logging.error(f"Failed to send alert email: {e}")
-        return False
+    """Send an alert (expiring warranties/licences etc.) as a list of lines."""
+    subject, html_body, text_body = email_templates.alert(subject, [str(i) for i in items], intro, FRONTEND_URL)
+    return await mailer.send_mail(to=to_email, subject=subject, html=html_body, text=text_body)
 
 # ── Helper: Slack/Teams webhook notification ────────────────────────────────
 async def send_slack_notification(webhook_url: str, title: str, items: list) -> bool:
@@ -1811,24 +1735,11 @@ async def test_email(current_user: User = Depends(get_current_user)):
     """Send a test email to the logged-in user to verify ZeptoMail is working. Admin only."""
     if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
         raise HTTPException(status_code=403, detail="Access denied")
-    if not ZEPTOMAIL_TOKEN or not FROM_EMAIL:
-        raise HTTPException(
-            status_code=400,
-            detail="ZeptoMail not configured. Add ZEPTOMAIL_TOKEN, ZEPTOMAIL_API_URL and FROM_EMAIL to the server environment variables."
-        )
-    html_body = f"""
-    <html>
-      <body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
-        <h2 style="color:#4F46E5;">Email is Working!</h2>
-        <p>Hello {current_user.name},</p>
-        <p>This is a test email from your Asset Management system. Email is configured correctly.</p>
-        <p style="color:#6B7280;font-size:13px;">Sent from: {FROM_EMAIL}</p>
-      </body>
-    </html>"""
-    try:
-        await _send_email(current_user.email, "Asset Management — Test Email", html_body)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if not mailer.is_configured():
+        raise HTTPException(status_code=400, detail="Email is not configured. Set ZEPTOMAIL_TOKEN (and optionally ZEPTOMAIL_API_URL) in the backend environment.")
+    subject, html_body, text_body = email_templates.test_email(current_user.name)
+    if not await mailer.send_mail(to=current_user.email, name=current_user.name, subject=subject, html=html_body, text=text_body):
+        raise HTTPException(status_code=502, detail="ZeptoMail did not accept the message. Check the backend logs for the HTTP status.")
     return {"message": f"Test email sent to {current_user.email}"}
 
 
@@ -2078,18 +1989,12 @@ async def forgot_password(request: ForgotPasswordRequest, req: Request):
         "created_at": datetime.now(timezone.utc).isoformat()
     })
 
-    # Send real email (or log a warning if SMTP is not configured)
-    email_sent = await send_reset_email(
+    mailer.run_in_background(send_reset_email(
         to_email=request.email,
         reset_token=reset_token,
         user_name=user.get("name", "")
-    )
-
-    response: dict = {"message": "If an account with this email exists, a password reset link has been sent."}
-    if not email_sent:
-        # SMTP not configured — surface the token so the UI can show it directly
-        response["reset_token"] = reset_token
-    return response
+    ))
+    return {"message": "If an account with this email exists, a password reset link has been sent."}
 
 @api_router.post("/auth/reset-password")
 async def reset_password(request: ResetPasswordRequest):
@@ -2794,6 +2699,8 @@ async def create_order(order_data: OrderCreate, current_user: User = Depends(get
     )
     await db.orders.insert_one(order.model_dump())
 
+    mailer.run_in_background(notifications.notify_order_event(db, order.id, "submitted"))
+
     # Notify admins/managers about new order awaiting approval
     product = await db.products.find_one({"id": order_data.product_id}, {"_id": 0, "name": 1})
     product_name = product["name"] if product else "Unknown Product"
@@ -3057,6 +2964,8 @@ async def assign_asset(asset_id: str, assignment: AssetAssign, current_user: Use
     await _record_history(asset_id, "assigned", current_user.id, notes,
                           from_user_id=previous_holder, to_user_id=assignment.assigned_to)
 
+    mailer.run_in_background(notifications.notify_asset_assigned(db, asset_id, assignment.assigned_to, current_user.name))
+
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return Asset(**updated_asset)
 
@@ -3088,6 +2997,9 @@ async def update_asset(asset_id: str, asset_update: AssetUpdate, current_user: U
         from_user_id=from_user_id,
     )
 
+    if action == "retrieved" and from_user_id:
+        mailer.run_in_background(notifications.notify_asset_returned(db, asset_id, from_user_id, retrieved=True))
+
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return Asset(**updated_asset)
 
@@ -3117,6 +3029,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: User = Depends(
     )
     ticket.sla_due_at = _sla_due(ticket.created_at, ticket.priority.value)
     await db.tickets.insert_one(ticket.model_dump())
+    mailer.run_in_background(notifications.notify_ticket_event(db, ticket.id, ["created"]))
     return ticket
 
 @api_router.get("/tickets", response_model=List[Ticket])
@@ -3170,6 +3083,13 @@ async def update_ticket(ticket_id: str, ticket_update: TicketUpdate, current_use
     if unset:
         ops["$unset"] = unset
     await db.tickets.update_one({"id": ticket_id}, ops)
+    events = []
+    if "status" in update_data and update_data["status"] != ticket.get("status"):
+        events.append("status")
+    if "assigned_to" in update_data and update_data["assigned_to"] and update_data["assigned_to"] != ticket.get("assigned_to"):
+        events.append("assigned")
+    if events:
+        mailer.run_in_background(notifications.notify_ticket_event(db, ticket_id, events))
     updated_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     return Ticket(**updated_ticket)
 
@@ -3332,6 +3252,16 @@ async def create_employee(data: EmployeeCreate, current_user: User = Depends(get
         email=data.email, first_name=data.first_name, last_name=data.last_name, employee_id=data.employee_id,
         role=data.role, tenant_id=tenant_id, group_id=data.group_id, password=data.password,
     )
+    set_password_url = None
+    if not data.password:
+        reset_token = str(uuid.uuid4())
+        await db.password_resets.insert_one({
+            "token": reset_token, "user_id": user.id, "email": user.email,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+            "used": False, "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        set_password_url = f"{FRONTEND_URL}/reset-password?token={reset_token}"
+    mailer.run_in_background(notifications.send_welcome(user.name, user.email, set_password_url))
     return {"message": "Employee added successfully", "user": user, "has_password": bool(data.password)}
 
 BULK_EMPLOYEE_MAX_ROWS = 1000
@@ -3650,6 +3580,8 @@ async def checker_approve_order(order_id: str, comments: str = "", current_user:
     )
     await db.approval_history.insert_one(history.model_dump())
     
+    mailer.run_in_background(notifications.notify_order_event(db, order_id, "checker_approved"))
+
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
 
@@ -3703,6 +3635,8 @@ async def approver_approve_order(order_id: str, comments: str = "", current_user
     )
     await db.approval_history.insert_one(history.model_dump())
     
+    mailer.run_in_background(notifications.notify_order_event(db, order_id, "approved"))
+
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
 
@@ -3740,6 +3674,8 @@ async def reject_order(order_id: str, rejection_reason: str, current_user: User 
     )
     await db.approval_history.insert_one(history.model_dump())
     
+    mailer.run_in_background(notifications.notify_order_event(db, order_id, "rejected", rejection_reason))
+
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
 
@@ -3846,6 +3782,8 @@ async def dispatch_order(order_id: str, dispatch: OrderDispatch, current_user: U
             + ([f"Destination: {destination}"] if destination else []),
             "Your order has been fulfilled and dispatched from store:"
         )
+
+    mailer.run_in_background(notifications.notify_order_event(db, order_id, "dispatched", asset.get("asset_tag", "")))
 
     updated_order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated_order)
@@ -4000,6 +3938,8 @@ async def return_asset(asset_id: str, return_data: AssetReturn, current_user: Us
         notes_parts.insert(0, f"Returned by {returned_name}")
     await _record_history(asset_id, "returned", current_user.id, " | ".join(notes_parts),
                           from_user_id=returned_by)
+
+    mailer.run_in_background(notifications.notify_asset_returned(db, asset_id, returned_by, return_data.return_condition, days_overdue))
 
     updated_asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     result = Asset(**updated_asset).model_dump()
@@ -7203,20 +7143,8 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
     await db.invite_tokens.insert_one(invite.model_dump())
     # Send invite email
     invite_link = f"{FRONTEND_URL}/invite/{invite.token}"
-    invite_html = f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-      <h2 style="color:#4F46E5">You're Invited!</h2>
-      <p>{current_user.name} has invited you to join as <strong>{invite_data.role.replace('_',' ').title()}</strong>.</p>
-      <p style="margin:24px 0">
-        <a href="{invite_link}" style="background:#4F46E5;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Accept Invitation</a>
-      </p>
-      <p style="color:#888;font-size:12px">This link expires in 7 days. If you did not expect this invite, please ignore this email.</p>
-    </div>"""
-    try:
-        email_sent = await _send_email(invite.email, "You're invited to join the Asset Management System", invite_html)
-    except Exception as e:
-        logging.error(f"Failed to send invite email to {invite.email}: {e}")
-        email_sent = False
+    subject, invite_html, invite_text = email_templates.invite(current_user.name, invite_data.role.replace('_', ' ').title(), invite_link)
+    email_sent = await mailer.send_mail(to=invite.email, subject=subject, html=invite_html, text=invite_text)
     response = {"message": "Invitation created", "token": invite.token, "invite_link": invite_link, "email_sent": email_sent}
     if not email_sent:
         response["message"] = "Invitation created, but the email could not be sent. Share the invite link manually."
