@@ -51,6 +51,7 @@ const MasterQRRoute = () => {
 };
 import NotFound from './pages/NotFound';
 import './index.css';
+import { STOCK_TAKE_ENABLED } from './config/features';
 
 function AppRouter() {
   const location = useLocation();
@@ -107,23 +108,23 @@ function AppRouter() {
               }
             />
             
-            <Route
+            {STOCK_TAKE_ENABLED && (<Route
               path="/audits"
               element={
                 <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager']}>
                   <Audits />
                 </ProtectedRoute>
               }
-            />
+            />)}
 
-            <Route
+            {STOCK_TAKE_ENABLED && (<Route
               path="/audits/:auditId"
               element={
                 <ProtectedRoute allowedRoles={['super_admin', 'tenant_admin', 'asset_manager']}>
                   <AuditDetail />
                 </ProtectedRoute>
               }
-            />
+            />)}
 
             <Route
               path="/master-qrs"

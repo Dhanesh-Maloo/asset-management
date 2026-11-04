@@ -30,6 +30,7 @@ import {
   CalendarClock,
   ClipboardCheck
 } from 'lucide-react';
+import { STOCK_TAKE_ENABLED } from '../config/features';
 
 const ALL_ROLES = ['super_admin', 'tenant_admin', 'asset_manager', 'helpdesk_agent', 'employee'];
 const MANAGE_ROLES = ['super_admin', 'tenant_admin', 'asset_manager'];
@@ -46,7 +47,7 @@ export const NAV_GROUPS = [
     items: [
       { name: 'Assets', href: '/assets', icon: Laptop, roles: ALL_ROLES, feature: 'assets' },
       { name: 'Master QR Codes', href: '/master-qrs', icon: QrCode, roles: [...MANAGE_ROLES, 'helpdesk_agent'], feature: 'assets' },
-      { name: 'Stock-take', href: '/audits', icon: ClipboardCheck, roles: MANAGE_ROLES, feature: 'assets' },
+      ...(STOCK_TAKE_ENABLED ? [{ name: 'Stock-take', href: '/audits', icon: ClipboardCheck, roles: MANAGE_ROLES, feature: 'assets' }] : []),
       { name: 'Reservations', href: '/reservations', icon: CalendarDays, roles: ALL_ROLES, feature: 'assets' },
       { name: 'Product Catalog', href: '/products', icon: Package, roles: ALL_ROLES, feature: 'products' },
       { name: 'Orders', href: '/orders', icon: ShoppingCart, roles: ALL_ROLES, feature: 'orders' },
