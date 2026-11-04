@@ -167,3 +167,110 @@ def ticket_event(name: str, event: str, number: str, title: str, status: str, pr
     rows = [("Ticket", number), ("Title", title), ("Status", status.replace("_", " ").title()), ("Priority", priority.title())]
     html, text = _render(heading, [_hi(name), line], rows=rows, cta=("Open helpdesk", f"{app_url}/tickets"))
     return f"{heading}: {number}", html, text
+
+
+def order_received(name: str, product: str, quantity: int, received_by: str, app_url: str):
+    rows = [("Product", product), ("Quantity", str(quantity)), ("Confirmed by", received_by)]
+    html, text = _render("Order received", [_hi(name), "The requester has confirmed that this order arrived."], rows=rows, cta=("View orders", f"{app_url}/orders"))
+    return f"Order received: {product}", html, text
+
+
+def ticket_comment(name: str, number: str, title: str, author: str, comment: str, app_url: str):
+    snippet = comment if len(comment) <= 500 else comment[:500] + "..."
+    rows = [("Ticket", number), ("Title", title), ("From", author), ("Comment", snippet)]
+    html, text = _render("New reply on a ticket", [_hi(name), "There is a new comment on a helpdesk ticket you are part of."], rows=rows, cta=("Open helpdesk", f"{app_url}/tickets"))
+    return f"New comment on {number}", html, text
+
+
+_TRANSFER_COPY = {
+    "requested": ("Asset transfer requested", "A request to transfer an asset has been raised."),
+    "approved": ("Asset transfer approved", "The asset transfer has been approved."),
+    "rejected": ("Asset transfer rejected", "The asset transfer was not approved."),
+    "completed": ("Asset transferred", "The asset has been moved to its new holder."),
+    "cancelled": ("Asset transfer cancelled", "The asset transfer has been cancelled."),
+}
+
+
+def transfer_event(name: str, event: str, asset_tag: str, from_name: str, to_name: str, reason: str, app_url: str):
+    heading, line = _TRANSFER_COPY[event]
+    rows = [("Asset tag", asset_tag), ("From", from_name or "Store"), ("To", to_name or "Unknown")]
+    if reason:
+        rows.append(("Reason", reason))
+    html, text = _render(heading, [_hi(name), line], rows=rows, cta=("View assets", f"{app_url}/assets"))
+    return f"{heading}: {asset_tag}", html, text
+
+
+_RESERVATION_COPY = {
+    "created": ("Reservation requested", "A new asset reservation needs review."),
+    "approved": ("Reservation approved", "Your reservation has been approved."),
+    "rejected": ("Reservation rejected", "Your reservation could not be approved."),
+    "cancelled": ("Reservation cancelled", "A reservation has been cancelled."),
+    "completed": ("Reservation completed", "Your reservation has been marked completed."),
+}
+
+
+def reservation_event(name: str, event: str, asset_tag: str, product: str, start: str, end: str, purpose: str, requester: str, app_url: str):
+    heading, line = _RESERVATION_COPY[event]
+    rows = [("Asset tag", asset_tag), ("Product", product), ("From", start[:10]), ("To", end[:10])]
+    if event in ("created", "cancelled") and requester:
+        rows.append(("Requested by", requester))
+    if purpose:
+        rows.append(("Purpose", purpose))
+    html, text = _render(heading, [_hi(name), line], rows=rows, cta=("View reservations", f"{app_url}/reservations"))
+    return f"{heading}: {asset_tag}", html, text
+
+
+def maintenance_event(name: str, event: str, asset_tag: str, title: str, when: str, notes: str, app_url: str):
+    if event == "scheduled":
+        heading, line = "Maintenance scheduled", "A maintenance task has been scheduled."
+        rows = [("Asset tag", asset_tag), ("Task", title), ("Scheduled for", when[:10])]
+    else:
+        heading, line = "Maintenance completed", "A maintenance task has been completed."
+        rows = [("Asset tag", asset_tag), ("Task", title), ("Completed on", when[:10])]
+        if notes:
+            rows.append(("Notes", notes))
+    html, text = _render(heading, [_hi(name), line], rows=rows, cta=("Open Ownix", app_url))
+    return f"{heading}: {asset_tag}", html, text
+
+
+def asset_disposed(name: str, asset_tag: str, product: str, method: str, date: str, by: str, app_url: str):
+    rows = [("Asset tag", asset_tag), ("Product", product), ("Method", method or "-"), ("Date", (date or "")[:10] or "-"), ("Recorded by", by)]
+    html, text = _render("Asset disposed", [_hi(name), "An asset has been marked as disposed and removed from active inventory."], rows=rows, cta=("Open Ownix", app_url))
+    return f"Asset disposed: {asset_tag}", html, text
+
+
+def offboarding(name: str, employee: str, returned: List[str], still_holding: List[str], deactivated: bool, app_url: str):
+    rows = [("Employee", employee), ("Assets taken back", ", ".join(returned) or "None"), ("Still holding", ", ".join(still_holding) or "None"),
+            ("Account", "Deactivated" if deactivated else "Active")]
+    line = "The offboarding of an employee has been processed."
+    if still_holding:
+        line += " Some assets are still not recovered and need follow-up."
+    html, text = _render("Employee offboarding", [_hi(name), line], rows=rows, cta=("Open Ownix", app_url))
+    return f"Offboarding: {employee}", html, text
+
+
+def tenant_created(name: str, company: str, login_url: str):
+    html, text = _render("Your Ownix workspace is ready", [_hi(name), f"The workspace for {company} has been created on Ownix. You can sign in and start adding assets."], cta=("Sign in", login_url))
+    return f"Your Ownix workspace for {company}", html, text
+
+
+def subscription_changed(name: str, company: str, plan: str, app_url: str):
+    rows = [("Workspace", company), ("Plan", plan)]
+    html, text = _render("Subscription updated", [_hi(name), "The subscription plan for your workspace has changed."], rows=rows, cta=("View subscription", f"{app_url}/subscription"))
+    return f"Ownix plan updated: {plan}", html, text
+
+
+_PAYMENT_COPY = {
+    "issued": ("New invoice", "A new invoice has been issued for your workspace."),
+    "paid": ("Payment received", "Thank you. We have received your payment."),
+    "failed": ("Payment failed", "Your payment could not be completed. Please try again from the subscription page."),
+}
+
+
+def invoice_event(name: str, event: str, amount: str, currency: str, description: str, period: str, app_url: str):
+    heading, line = _PAYMENT_COPY[event]
+    rows = [("Amount", f"{amount} {currency}"), ("Description", description)]
+    if period:
+        rows.append(("Period", period))
+    html, text = _render(heading, [_hi(name), line], rows=rows, cta=("View subscription", f"{app_url}/subscription"))
+    return f"{heading}: {amount} {currency}", html, text

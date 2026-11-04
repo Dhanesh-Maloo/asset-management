@@ -1730,6 +1730,23 @@ async def get_me_oauth(request: Request, current_user: User = Depends(get_curren
     """Get current user info - works with both OAuth session and JWT"""
     return current_user
 
+async def _store_email_log(record: dict) -> None:
+    user = await db.users.find_one({"email": record["to"]}, {"_id": 0, "tenant_id": 1})
+    await db.email_log.insert_one({**record, "id": str(uuid.uuid4()), "tenant_id": (user or {}).get("tenant_id"),
+                                   "sent_at": datetime.now(timezone.utc).isoformat()})
+
+mailer.set_log_sink(_store_email_log)
+
+@api_router.get("/email-log")
+async def get_email_log(limit: int = 100, status: Optional[str] = None, current_user: User = Depends(get_current_user)):
+    """Delivery record of every notification email (newest first). Admins see their own tenant."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query: dict = {} if current_user.role == UserRole.SUPER_ADMIN else {"tenant_id": current_user.tenant_id}
+    if status in ("sent", "failed"):
+        query["status"] = status
+    return await db.email_log.find(query, {"_id": 0}).sort("sent_at", -1).to_list(max(1, min(limit, 500)))
+
 @api_router.post("/auth/test-email")
 async def test_email(current_user: User = Depends(get_current_user)):
     """Send a test email to the logged-in user to verify ZeptoMail is working. Admin only."""
@@ -3805,6 +3822,7 @@ async def confirm_order_received(order_id: str, current_user: User = Depends(get
         "received_at": datetime.now(timezone.utc).isoformat(), "received_by": current_user.id}})
     await _record_history(order["dispatched_asset_id"], "received", current_user.id,
                           f"Receipt confirmed for Order {order_id[:8]}", to_user_id=order.get("user_id"))
+    mailer.run_in_background(notifications.notify_order_received(db, order_id, current_user.name))
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated)
 
@@ -3831,6 +3849,7 @@ async def create_maintenance(maintenance_data: MaintenanceScheduleCreate, curren
         tenant_id=asset["tenant_id"]
     )
     await db.maintenance_schedules.insert_one(maintenance.model_dump())
+    mailer.run_in_background(notifications.notify_maintenance(db, maintenance.id, "scheduled", current_user.id))
     return maintenance
 
 @api_router.get("/maintenance", response_model=List[MaintenanceSchedule])
@@ -4234,6 +4253,8 @@ async def offboard_user(user_id: str, body: OffboardRequest, current_user: User 
     await write_audit_log(current_user.id, "offboard", "user", user_id,
                           f"{len(returned)} asset(s) taken back, {len(remaining)} still held" + (", account deactivated" if body.deactivate else ""),
                           tenant_id=current_user.tenant_id)
+    mailer.run_in_background(notifications.notify_offboarding(
+        db, user_id, [a.get("asset_tag", "") for a in returned], [a.get("asset_tag", "?") for a in remaining], bool(body.deactivate), current_user.id))
     return {"returned": len(returned), "skipped": skipped, "still_holding": [a.get("asset_tag") for a in remaining],
             "deactivated": bool(body.deactivate)}
 
@@ -4424,6 +4445,7 @@ async def update_tenant_subscription(tenant_id: str, tier_id: str, current_user:
         }}
     )
     
+    mailer.run_in_background(notifications.notify_subscription_changed(db, tenant_id, tier_id))
     updated = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
     return Tenant(**updated)
 
@@ -4498,6 +4520,7 @@ async def create_invoice(invoice_data: InvoiceCreate, tenant_id: str, current_us
         raise HTTPException(status_code=403, detail="Only super admins can create invoices")
     invoice = Invoice(tenant_id=tenant_id, **invoice_data.model_dump())
     await db.invoices.insert_one(invoice.model_dump())
+    mailer.run_in_background(notifications.notify_invoice(db, invoice.id, "issued"))
     return invoice
 
 @api_router.patch("/invoices/{invoice_id}")
@@ -4628,9 +4651,11 @@ async def payment_success(request: Request):
                         "enabled_features": tier.get('allowed_features', [])
                     }}
                 )
+        mailer.run_in_background(notifications.notify_invoice(db, udf1, "paid"))
         return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=success", status_code=302)
     else:
         await db.invoices.update_one({"id": udf1, "status": {"$ne": "paid"}}, {"$set": {"status": "failed"}})
+        mailer.run_in_background(notifications.notify_invoice(db, udf1, "failed"))
         return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=failed", status_code=302)
 
 @api_router.post("/payments/failure")
@@ -4640,6 +4665,7 @@ async def payment_failure(request: Request):
     udf1 = data.get('udf1', '')
     if udf1:
         await db.invoices.update_one({"id": udf1, "status": {"$ne": "paid"}}, {"$set": {"status": "failed"}})
+        mailer.run_in_background(notifications.notify_invoice(db, udf1, "failed"))
     return RedirectResponse(f"{FRONTEND_URL}/subscription?payment=failed", status_code=302)
 
 # ── DELETE endpoints ──────────────────────────────────────────────────────────
@@ -5701,6 +5727,7 @@ async def create_reservation(res: ReservationCreate, current_user: User = Depend
         tenant_id=current_user.tenant_id or asset["tenant_id"],
     )
     await db.reservations.insert_one(reservation.model_dump())
+    mailer.run_in_background(notifications.notify_reservation(db, reservation.id, "created", current_user.id))
     return reservation
 
 @api_router.get("/reservations")
@@ -5727,6 +5754,7 @@ async def update_reservation(reservation_id: str, status: str, current_user: Use
     elif status in {"approved", "rejected"} and current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN, UserRole.ASSET_MANAGER]:
         raise HTTPException(status_code=403, detail="Access denied")
     await db.reservations.update_one({"id": reservation_id}, {"$set": {"status": status}})
+    mailer.run_in_background(notifications.notify_reservation(db, reservation_id, status, current_user.id))
     return {"message": f"Reservation {status}"}
 
 @api_router.delete("/reservations/{reservation_id}")
@@ -5763,6 +5791,7 @@ async def add_comment(ticket_id: str, body: TicketCommentCreate, current_user: U
     )
     await db.ticket_comments.insert_one(comment.model_dump())
     await db.tickets.update_one({"id": ticket_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    mailer.run_in_background(notifications.notify_ticket_comment(db, ticket_id, current_user.id, current_user.name, body.content))
     return comment
 
 @api_router.get("/tickets/{ticket_id}/comments")
@@ -5806,6 +5835,7 @@ async def create_transfer(req: TransferCreate, current_user: User = Depends(get_
         reason=req.reason,
     )
     await db.asset_transfers.insert_one(transfer.model_dump())
+    mailer.run_in_background(notifications.notify_transfer(db, transfer.id, "requested", current_user.id))
     return transfer
 
 @api_router.get("/transfers")
@@ -5857,6 +5887,7 @@ async def update_transfer(transfer_id: str, action: str, current_user: User = De
         await write_audit_log(current_user.id, "transfer_complete", "asset", transfer["asset_id"],
                               f"Transferred to {transfer['to_user_id']}", tenant_id=current_user.tenant_id)
     await db.asset_transfers.update_one({"id": transfer_id}, {"$set": updates})
+    mailer.run_in_background(notifications.notify_transfer(db, transfer_id, action, current_user.id))
     return {"message": f"Transfer {action}"}
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6391,6 +6422,7 @@ async def complete_maintenance(
         )
         await db.maintenance_schedules.insert_one(next_maint.model_dump())
         next_id = next_maint.id
+    mailer.run_in_background(notifications.notify_maintenance(db, maintenance_id, "completed", current_user.id))
     return {"message": "Maintenance completed", "next_maintenance_id": next_id}
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6525,6 +6557,7 @@ async def dispose_asset(asset_id: str, data: AssetDispose, current_user: User = 
         notes=f"Disposed via {data.disposal_method}. Sale proceeds: {data.sale_proceeds}"
     )
     await db.asset_history.insert_one(history.model_dump())
+    mailer.run_in_background(notifications.notify_asset_disposed(db, asset_id, current_user.name, current_user.id))
     updated = await db.assets.find_one({"id": asset_id}, {"_id": 0})
     return Asset(**updated)
 

@@ -54,6 +54,7 @@ async def send_mail(
     token = _token()
     if not token:
         logger.warning("ZEPTOMAIL_TOKEN is not set; skipping email '%s'", subject)
+        await _record(to, subject, False, "ZEPTOMAIL_TOKEN not set")
         return False
     recipient = {"address": to}
     if name:
@@ -79,12 +80,33 @@ async def send_mail(
             )
     except Exception as exc:  # network error, timeout, bad URL
         logger.error("ZeptoMail request failed for '%s': %s", subject, type(exc).__name__)
+        await _record(to, subject, False, type(exc).__name__)
         return False
     if resp.status_code >= 400:
         logger.error("ZeptoMail rejected '%s': HTTP %s %s", subject, resp.status_code, resp.text[:300])
+        await _record(to, subject, False, f"HTTP {resp.status_code}")
         return False
     logger.info("Email '%s' sent (HTTP %s)", subject, resp.status_code)
+    await _record(to, subject, True)
     return True
+
+
+# Optional async callback(record: dict) so the app can store a delivery log without mailer knowing about the database.
+_log_sink = None
+
+
+def set_log_sink(fn) -> None:
+    global _log_sink
+    _log_sink = fn
+
+
+async def _record(to: str, subject: str, ok: bool, error: str = "") -> None:
+    if _log_sink is None:
+        return
+    try:
+        await _log_sink({"to": to, "subject": subject, "status": "sent" if ok else "failed", "error": error[:300]})
+    except Exception:
+        logger.exception("email log sink failed")
 
 
 _background: Set["asyncio.Task[object]"] = set()
