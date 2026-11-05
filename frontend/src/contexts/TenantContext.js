@@ -10,7 +10,7 @@ const DEFAULT_BRANDING = {
   logo_url: '',
   primary_color: '#4F46E5',
   secondary_color: '#F1F5F9',
-  company_name: 'IT Assets',
+  company_name: 'Ownix',
   enabled_features: ['products', 'orders', 'assets', 'tickets', 'users', 'groups', 'workflows']
 };
 

@@ -76,7 +76,7 @@ const OnboardingModal = () => {
         <DialogHeader>
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="h-5 w-5 text-primary" />
-            <DialogTitle className="text-xl">Welcome to IT Assets!</DialogTitle>
+            <DialogTitle className="text-xl">Welcome to Ownix!</DialogTitle>
           </div>
           <DialogDescription>
             Let's get you set up in 3 quick steps. You can always come back to this later.
