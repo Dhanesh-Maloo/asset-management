@@ -1731,8 +1731,11 @@ async def get_me_oauth(request: Request, current_user: User = Depends(get_curren
     return current_user
 
 async def _store_email_log(record: dict) -> None:
-    user = await db.users.find_one({"email": record["to"]}, {"_id": 0, "tenant_id": 1})
-    await db.email_log.insert_one({**record, "id": str(uuid.uuid4()), "tenant_id": (user or {}).get("tenant_id"),
+    tenant_id = record.get("tenant_id")
+    if not tenant_id:
+        user = await db.users.find_one({"email": record["to"]}, {"_id": 0, "tenant_id": 1})
+        tenant_id = (user or {}).get("tenant_id")
+    await db.email_log.insert_one({**record, "id": str(uuid.uuid4()), "tenant_id": tenant_id,
                                    "sent_at": datetime.now(timezone.utc).isoformat()})
 
 mailer.set_log_sink(_store_email_log)
@@ -7165,6 +7168,10 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
     existing_user = await db.users.find_one({"email": invite_data.email.lower()})
     if existing_user:
         raise HTTPException(status_code=400, detail="A user with this email already exists")
+    # Catch typos like "ivaluindia.com" up front: a mail provider accepts mail for a dead domain and it silently vanishes
+    if not await mailer.email_domain_exists(invite_data.email):
+        domain = invite_data.email.rsplit("@", 1)[-1]
+        raise HTTPException(status_code=400, detail=f"The domain '{domain}' does not exist. Please check the email address for a typo.")
     # Invalidate any existing pending invites for this email
     await db.invite_tokens.delete_many({"email": invite_data.email.lower(), "accepted": False})
     invite = InviteToken(
@@ -7177,11 +7184,32 @@ async def create_invite(invite_data: InviteCreate, current_user: User = Depends(
     # Send invite email
     invite_link = f"{FRONTEND_URL}/invite/{invite.token}"
     subject, invite_html, invite_text = email_templates.invite(current_user.name, invite_data.role.replace('_', ' ').title(), invite_link)
-    email_sent = await mailer.send_mail(to=invite.email, subject=subject, html=invite_html, text=invite_text)
+    email_sent = await mailer.send_mail(to=invite.email, subject=subject, html=invite_html, text=invite_text, tenant_id=tenant_id)
     response = {"message": "Invitation created", "token": invite.token, "invite_link": invite_link, "email_sent": email_sent}
     if not email_sent:
         response["message"] = "Invitation created, but the email could not be sent. Share the invite link manually."
     return response
+
+
+@api_router.post("/auth/invites/{invite_id}/resend")
+async def resend_invite(invite_id: str, current_user: User = Depends(get_current_user)):
+    """Re-send the invitation email for a pending invite (and extend it if it has expired)."""
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.TENANT_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    query: dict = {"id": invite_id, "accepted": False}
+    if current_user.role != UserRole.SUPER_ADMIN:
+        query["tenant_id"] = current_user.tenant_id
+    invite = await db.invite_tokens.find_one(query, {"_id": 0})
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+    if datetime.fromisoformat(invite["expires_at"]) < datetime.now(timezone.utc):
+        invite["expires_at"] = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        await db.invite_tokens.update_one({"id": invite_id}, {"$set": {"expires_at": invite["expires_at"]}})
+    invite_link = f"{FRONTEND_URL}/invite/{invite['token']}"
+    subject, html_body, text_body = email_templates.invite(current_user.name, invite["role"].replace('_', ' ').title(), invite_link)
+    email_sent = await mailer.send_mail(to=invite["email"], subject=subject, html=html_body, text=text_body, tenant_id=invite.get("tenant_id"))
+    return {"email_sent": email_sent, "invite_link": invite_link,
+            "message": "Invitation email sent" if email_sent else "The email could not be sent. Share the invite link manually."}
 
 
 @api_router.get("/auth/invite/{token}")

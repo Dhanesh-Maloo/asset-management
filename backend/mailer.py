@@ -48,13 +48,17 @@ async def send_mail(
     html: str,
     text: str = "",
     name: str = "",
+    tenant_id: Optional[str] = None,
     transport: Optional[httpx.AsyncBaseTransport] = None,
 ) -> bool:
-    """Send one email. Never raises: returns True on success, False on any failure."""
+    """Send one email. Never raises: returns True on success, False on any failure.
+
+    tenant_id tags the delivery-log entry for recipients who are not users yet (e.g. invitees).
+    """
     token = _token()
     if not token:
         logger.warning("ZEPTOMAIL_TOKEN is not set; skipping email '%s'", subject)
-        await _record(to, subject, False, "ZEPTOMAIL_TOKEN not set")
+        await _record(to, subject, False, "ZEPTOMAIL_TOKEN not set", tenant_id)
         return False
     recipient = {"address": to}
     if name:
@@ -80,15 +84,34 @@ async def send_mail(
             )
     except Exception as exc:  # network error, timeout, bad URL
         logger.error("ZeptoMail request failed for '%s': %s", subject, type(exc).__name__)
-        await _record(to, subject, False, type(exc).__name__)
+        await _record(to, subject, False, type(exc).__name__, tenant_id)
         return False
     if resp.status_code >= 400:
         logger.error("ZeptoMail rejected '%s': HTTP %s %s", subject, resp.status_code, resp.text[:300])
-        await _record(to, subject, False, f"HTTP {resp.status_code}")
+        await _record(to, subject, False, f"HTTP {resp.status_code}", tenant_id)
         return False
     logger.info("Email '%s' sent (HTTP %s)", subject, resp.status_code)
-    await _record(to, subject, True)
+    await _record(to, subject, True, "", tenant_id)
     return True
+
+
+async def email_domain_exists(email: str) -> bool:
+    """False only when DNS definitively says the email's domain does not exist (NXDOMAIN).
+
+    Timeouts and other DNS trouble return True so a flaky resolver never blocks a legitimate invite.
+    """
+    import dns.asyncresolver
+    import dns.exception
+    import dns.resolver
+
+    domain = email.rsplit("@", 1)[-1].strip().lower()
+    try:
+        await dns.asyncresolver.resolve(domain, "MX", lifetime=5)
+        return True
+    except dns.resolver.NXDOMAIN:
+        return False
+    except dns.exception.DNSException:
+        return True  # NoAnswer (A-record-only domains), timeout, etc.
 
 
 # Optional async callback(record: dict) so the app can store a delivery log without mailer knowing about the database.
@@ -100,11 +123,14 @@ def set_log_sink(fn) -> None:
     _log_sink = fn
 
 
-async def _record(to: str, subject: str, ok: bool, error: str = "") -> None:
+async def _record(to: str, subject: str, ok: bool, error: str = "", tenant_id: Optional[str] = None) -> None:
     if _log_sink is None:
         return
     try:
-        await _log_sink({"to": to, "subject": subject, "status": "sent" if ok else "failed", "error": error[:300]})
+        record = {"to": to, "subject": subject, "status": "sent" if ok else "failed", "error": error[:300]}
+        if tenant_id:
+            record["tenant_id"] = tenant_id
+        await _log_sink(record)
     except Exception:
         logger.exception("email log sink failed")
 

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package, KeyRound, Upload, UserMinus } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2, Mail, Copy, Check, Package, KeyRound, Upload, UserMinus, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmployeeAssetsDialog } from '../components/EmployeeAssetsDialog';
 import { OffboardDialog } from '../components/OffboardDialog';
@@ -117,6 +117,25 @@ const Users = () => {
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to add employee');
+    }
+  };
+
+  const [resendingId, setResendingId] = useState(null);
+
+  const handleResendInvite = async (inv) => {
+    setResendingId(inv.id);
+    try {
+      const res = await axios.post(`${API}/auth/invites/${inv.id}/resend`);
+      if (res.data.email_sent) {
+        toast.success(`Invitation email sent to ${inv.email}`);
+      } else {
+        toast.error('The email could not be sent. Copy the invite link and share it manually.');
+        navigator.clipboard?.writeText(res.data.invite_link);
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to resend invitation');
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -411,6 +430,7 @@ const Users = () => {
                       <TableHead>Email</TableHead>
                       <TableHead>Role</TableHead>
                       <TableHead>Expires At</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -420,6 +440,12 @@ const Users = () => {
                         <TableCell>{getRoleBadge(inv.role)}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(inv.expires_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="outline" disabled={resendingId === inv.id} onClick={() => handleResendInvite(inv)}>
+                            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${resendingId === inv.id ? 'animate-spin' : ''}`} />
+                            Resend
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -448,10 +474,17 @@ const Users = () => {
           </DialogHeader>
           {inviteResult ? (
             <div className="space-y-4 py-2">
-              <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 text-sm font-medium">
-                <Check className="h-4 w-4 flex-shrink-0" />
-                Invitation created successfully!
-              </div>
+              {inviteResult.email_sent === false ? (
+                <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 text-sm font-medium">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                  <span>Invitation created, but the email could not be sent. Copy the link below and share it with the employee yourself, or use Resend in Pending Invitations.</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 text-sm font-medium">
+                  <Check className="h-4 w-4 flex-shrink-0" />
+                  Invitation email sent to {inviteForm.email}
+                </div>
+              )}
               <div>
                 <Label className="mb-1 block text-sm">Invite Link (share this with the user)</Label>
                 <div className="flex gap-2">

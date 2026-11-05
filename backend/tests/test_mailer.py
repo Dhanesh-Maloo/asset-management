@@ -81,3 +81,25 @@ def test_every_template_renders():
         assert email_templates.order_event("A", event, "Laptop", 2, "reason", "Bob", url)[1]
     for event in ("created", "assigned", "status"):
         assert email_templates.ticket_event("A", event, "TKT-1", "Title", "open", "high", url)[1]
+
+
+def test_log_entry_carries_explicit_tenant_id(monkeypatch):
+    """Invitees are not users yet, so the caller must be able to tag the delivery-log entry with a tenant."""
+    monkeypatch.setenv("ZEPTOMAIL_TOKEN", "t")
+    records = []
+
+    async def sink(rec):
+        records.append(rec)
+
+    mailer.set_log_sink(sink)
+    try:
+        transport = httpx.MockTransport(lambda r: httpx.Response(201, json={}))
+        assert _run(mailer.send_mail(to="new@example.com", subject="S", html="x", tenant_id="tenant-1", transport=transport))
+        assert records[-1]["tenant_id"] == "tenant-1" and records[-1]["status"] == "sent"
+    finally:
+        mailer.set_log_sink(None)
+
+
+def test_email_domain_check_flags_typo_domain():
+    assert _run(mailer.email_domain_exists("x@ivaluindia.com")) is False
+    assert _run(mailer.email_domain_exists("x@ivalueindia.com")) is True
