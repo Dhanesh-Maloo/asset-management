@@ -123,7 +123,7 @@ const Signup = () => {
             <Boxes size={20} color="white" />
           </div>
           <span style={{ color: 'white', fontWeight: 700, fontSize: '16px', letterSpacing: '-0.3px' }}>
-            Asset Management
+            Ownix
           </span>
         </div>
 
@@ -190,7 +190,7 @@ const Signup = () => {
             <div style={{ width: '36px', height: '36px', background: '#2563eb', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Boxes size={18} color="white" />
             </div>
-            <span style={{ fontWeight: 700, fontSize: '15px', color: '#111827' }}>Asset Management</span>
+            <span style={{ fontWeight: 700, fontSize: '15px', color: '#111827' }}>Ownix</span>
           </div>
 
           <h1 style={{ fontSize: '26px', fontWeight: 800, color: '#0f172a', marginBottom: '4px', letterSpacing: '-0.4px' }}>
@@ -276,9 +276,9 @@ const Signup = () => {
               <label style={labelStyle}>Password</label>
               <div style={{ position: 'relative' }}>
                 <input
-                  id="admin_password" type={showPassword ? 'text' : 'password'} placeholder="At least 6 characters"
+                  id="admin_password" type={showPassword ? 'text' : 'password'} placeholder="At least 12 characters"
                   value={formData.admin_password} onChange={set('admin_password')}
-                  required minLength={6} data-testid="signup-admin-password" style={{ ...inputStyle, paddingRight: '42px' }}
+                  required minLength={12} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9]).{12,}" title="At least 12 characters with upper case, lower case and a number" data-testid="signup-admin-password" style={{ ...inputStyle, paddingRight: '42px' }}
                 />
                 <button
                   type="button"

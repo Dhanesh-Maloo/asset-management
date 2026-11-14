@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { validatePassword } from '../lib/validatePassword';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '../components/ui/button';
@@ -36,8 +37,9 @@ const ResetPassword = () => {
       toast.error('Passwords do not match');
       return;
     }
-    if (newPassword.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    const pwError = validatePassword(newPassword);
+    if (pwError) {
+      toast.error(pwError);
       return;
     }
     setLoading(true);
@@ -63,7 +65,7 @@ const ResetPassword = () => {
         <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
           <Boxes className="h-5 w-5 text-white" />
         </div>
-        <span className="text-lg font-semibold font-heading text-white">Asset Management</span>
+        <span className="text-lg font-semibold font-heading text-white">Ownix</span>
       </div>
 
       <Card className="w-full max-w-md relative z-10 shadow-2xl animate-fade-in">
@@ -121,7 +123,7 @@ const ResetPassword = () => {
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 6 characters"
+                    placeholder="At least 12 characters"
                     className="pl-10"
                     required
                   />

@@ -168,9 +168,11 @@ const Locations = () => {
                         <button onClick={() => openEdit(loc)} className="p-1.5 hover:bg-muted rounded text-slate-400 hover:text-slate-700">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
-                        <button onClick={() => setDeleteId(loc.id)} className="p-1.5 hover:bg-destructive/10 rounded-md text-muted-foreground hover:text-destructive">
+                        {['super_admin', 'tenant_admin'].includes(user?.role) && (
+                        <button aria-label="Delete location" onClick={() => setDeleteId(loc.id)} className="p-1.5 hover:bg-destructive/10 rounded-md text-muted-foreground hover:text-destructive">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
+                        )}
                       </div>
                     )}
                   </div>

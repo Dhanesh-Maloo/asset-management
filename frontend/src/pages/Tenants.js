@@ -357,9 +357,9 @@ const Tenants = () => {
                   type="password"
                   value={formData.admin_password}
                   onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
-                  placeholder="Min 6 characters"
+                  placeholder="Min 12 characters (upper, lower, number)"
                   required
-                  minLength={6}
+                  minLength={12}
                   data-testid="tenant-admin-password-input"
                 />
                 <p className="text-xs text-muted-foreground mt-1">The admin can change this password after first login</p>

@@ -111,7 +111,7 @@ const Tickets = () => {
       setFormData({ title: '', description: '', priority: 'medium', category: 'general' });
       fetchTickets();
     } catch (error) {
-      toast.error('Failed to create ticket');
+      toast.error(error.response?.data?.detail || 'Failed to create ticket');
     }
   };
 
@@ -350,7 +350,7 @@ const Tickets = () => {
                       {canManage && <TableHead>Assigned To</TableHead>}
                       {canManage && <TableHead>Created By</TableHead>}
                       <TableHead>Date</TableHead>
-                      {canManage && <TableHead>Actions</TableHead>}
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -393,7 +393,7 @@ const Tickets = () => {
                         <TableCell className="text-sm text-muted-foreground">
                           {new Date(ticket.created_at).toLocaleDateString()}
                         </TableCell>
-                        {canManage && (
+                        {(
                           <TableCell>
                             <div className="flex gap-2">
                               <Button
@@ -404,6 +404,7 @@ const Tickets = () => {
                               >
                                 <MessageSquare className="h-3.5 w-3.5 mr-1" /> Comments
                               </Button>
+                              {canManage && (<>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -426,6 +427,7 @@ const Tickets = () => {
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
+                              </>)}
                             </div>
                           </TableCell>
                         )}

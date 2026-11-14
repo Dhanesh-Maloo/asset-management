@@ -174,7 +174,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                           : 'text-sidebar-foreground hover:bg-white/5 hover:text-white'
                         }`
                       }
-                      data-testid={`nav-${item.name.toLowerCase().replace(' ', '-')}`}
+                      data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
                     >
                       {({ isActive }) => (
                         <>

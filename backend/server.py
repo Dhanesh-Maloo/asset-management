@@ -1834,7 +1834,7 @@ async def public_signup(
         raise HTTPException(status_code=400, detail="Invalid domain format")
     if subdomain and (len(subdomain) > 63 or not re.match(r'^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]?$', subdomain.lower())):
         raise HTTPException(status_code=400, detail="Subdomain must be lowercase letters, numbers, and hyphens only (max 63 chars)")
-    if currency not in ("USD", "EUR", "GBP", "INR", "AED", "SGD", "AUD", "CAD"):
+    if currency not in ("USD", "EUR", "GBP", "INR", "AED", "SAR", "SGD", "AUD", "CAD"):
         raise HTTPException(status_code=400, detail="Unsupported currency")
 
     # Password strength

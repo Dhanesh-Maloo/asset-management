@@ -390,11 +390,12 @@ const Assets = () => {
       assigned: { className: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20 hover:bg-blue-500/15', label: 'Assigned' },
       in_use: { className: 'bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20 hover:bg-violet-500/15', label: 'In Use' },
       under_maintenance: { className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/15', label: 'Maintenance' },
+      checked_out: { className: 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20 hover:bg-sky-500/15', label: 'Checked Out' },
       retired: { className: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20 hover:bg-slate-500/15', label: 'Retired' },
       disposed: { className: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20 hover:bg-slate-500/15', label: 'Disposed' }
     };
 
-    const config = statusConfig[status] || statusConfig.available;
+    const config = statusConfig[status] || { className: 'bg-muted text-muted-foreground', label: String(status || 'Unknown').replace(/_/g, ' ') };
     return (
       <Badge variant="outline" className={`gap-1.5 font-medium ${config.className}`}>
         <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -578,6 +579,7 @@ const Assets = () => {
                     <SelectItem value="available">Available</SelectItem>
                     <SelectItem value="assigned">Assigned</SelectItem>
                     <SelectItem value="in_use">In Use</SelectItem>
+                    <SelectItem value="checked_out">Checked Out</SelectItem>
                     <SelectItem value="under_maintenance">Maintenance</SelectItem>
                     <SelectItem value="disposed">Disposed</SelectItem>
                   </SelectContent>
@@ -1042,6 +1044,7 @@ const Assets = () => {
                   <SelectItem value="available">Available</SelectItem>
                   <SelectItem value="assigned">Assigned</SelectItem>
                   <SelectItem value="in_use">In Use</SelectItem>
+                  <SelectItem value="checked_out">Checked Out</SelectItem>
                   <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
                   <SelectItem value="disposed">Disposed</SelectItem>
                 </SelectContent>

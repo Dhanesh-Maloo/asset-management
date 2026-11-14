@@ -279,7 +279,7 @@ const Dashboard = () => {
   return (
     <DashboardLayout>
       {/* Demo Data Banner */}
-      {demoStatus?.has_demo_data && (
+      {demoStatus?.has_demo_data && ['super_admin', 'tenant_admin'].includes(user?.role) && (
         <div className="bg-warning/10 border-b border-warning/20 px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2.5 text-sm">
             <Sparkles className="h-4 w-4 text-warning shrink-0" />
