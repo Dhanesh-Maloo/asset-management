@@ -5089,13 +5089,18 @@ async def create_department(dept_data: DepartmentCreate, current_user: User = De
     await db.departments.insert_one(dept.model_dump())
     return dept
 
-@api_router.get("/departments", response_model=List[Department])
+@api_router.get("/departments")
 async def get_departments(current_user: User = Depends(get_current_user)):
     query: dict = {}
     if current_user.role != UserRole.SUPER_ADMIN:
         query["tenant_id"] = current_user.tenant_id
     depts = await db.departments.find(query, {"_id": 0}).to_list(500)
-    return [Department(**d) for d in depts]
+    out = [Department(**d).model_dump() for d in depts]
+    if current_user.role == UserRole.SUPER_ADMIN:
+        names = {t["id"]: t.get("name") async for t in db.tenants.find({}, {"_id": 0, "id": 1, "name": 1})}
+        for d in out:
+            d["tenant_name"] = names.get(d.get("tenant_id")) or "—"
+    return out
 
 @api_router.patch("/departments/{dept_id}", response_model=Department)
 async def update_department(dept_id: str, update: DepartmentUpdate, current_user: User = Depends(get_current_user)):

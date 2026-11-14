@@ -170,6 +170,7 @@ const Departments = () => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Department</TableHead>
+                      {user?.role === 'super_admin' && <TableHead>Company</TableHead>}
                       <TableHead>Description</TableHead>
                       <TableHead>Budget</TableHead>
                       <TableHead>Assets</TableHead>
@@ -184,6 +185,7 @@ const Departments = () => {
                       return (
                         <TableRow key={d.id}>
                           <TableCell className="font-semibold">{d.name}</TableCell>
+                          {user?.role === 'super_admin' && <TableCell className="text-sm">{d.tenant_name || '—'}</TableCell>}
                           <TableCell className="text-muted-foreground text-sm">{d.description || '—'}</TableCell>
                           <TableCell>${(d.budget || 0).toLocaleString()}</TableCell>
                           <TableCell>
