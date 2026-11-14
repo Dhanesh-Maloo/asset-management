@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Separator } from '../components/ui/separator';
-import { Building2, Plus, Crown, User, Globe, Trash2 } from 'lucide-react';
+import { Building2, Plus, Crown, User, Globe, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -32,6 +32,8 @@ const Tenants = () => {
   const [tenantToDelete, setTenantToDelete] = useState(null);
   const [selectedTenant, setSelectedTenant] = useState(null);
   const [selectedTierId, setSelectedTierId] = useState('');
+  const [overview, setOverview] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     company_name: '',
@@ -89,6 +91,20 @@ const Tenants = () => {
         ? detail
         : 'Failed to create tenant';
       toast.error(msg);
+    }
+  };
+
+  const openOverview = async (tenant) => {
+    setOverview({ tenant });
+    setOverviewLoading(true);
+    try {
+      const res = await axios.get(`${API}/tenants/${tenant.id}/overview`);
+      setOverview(res.data);
+    } catch (error) {
+      toast.error('Failed to load tenant details');
+      setOverview(null);
+    } finally {
+      setOverviewLoading(false);
     }
   };
 
@@ -210,6 +226,10 @@ const Tenants = () => {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openOverview(tenant)} data-testid={`view-tenant-btn-${tenant.id}`}>
+                                <Eye className="h-3.5 w-3.5 mr-1.5" />
+                                View
+                              </Button>
                               <Button size="sm" variant="outline" onClick={() => openTierDialog(tenant)} data-testid={`change-tier-btn-${tenant.id}`}>
                                 <Crown className="h-3.5 w-3.5 mr-1.5" />
                                 Change Tier
@@ -354,6 +374,80 @@ const Tenants = () => {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Tenant details dialog */}
+      <Dialog open={!!overview} onOpenChange={(o) => { if (!o) setOverview(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="tenant-overview-dialog">
+          <DialogHeader>
+            <DialogTitle>{overview?.tenant?.name}</DialogTitle>
+            <DialogDescription>
+              {overview?.tenant?.domain}{overview?.tier ? ` · ${overview.tier} plan` : ''}{overview?.tenant?.created_at ? ` · created ${new Date(overview.tenant.created_at).toLocaleDateString()}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {overviewLoading || !overview?.counts ? (
+            <div className="py-10 text-center text-muted-foreground">Loading...</div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {Object.entries(overview.counts).map(([k, v]) => (
+                  <div key={k} className="rounded-lg border p-3">
+                    <div className="text-xl font-bold">{v}</div>
+                    <div className="text-xs text-muted-foreground capitalize">{k.replace('_', ' ')}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold mb-2">Assets by status</h4>
+                <div className="flex flex-wrap gap-2">
+                  {Object.keys(overview.assets_by_status).length === 0 && <span className="text-sm text-muted-foreground">No assets</span>}
+                  {Object.entries(overview.assets_by_status).map(([k, v]) => (
+                    <Badge key={k} variant="outline" className="capitalize">{k.replace('_', ' ')}: {v}</Badge>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold mb-2">Users ({overview.users.length})</h4>
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Last login</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {overview.users.map((u) => (
+                        <TableRow key={u.email}>
+                          <TableCell className="font-medium">{u.name}</TableCell>
+                          <TableCell className="text-sm">{u.email}</TableCell>
+                          <TableCell className="text-sm capitalize">{(u.role || '').replace('_', ' ')}</TableCell>
+                          <TableCell className="text-sm capitalize">{u.status}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {[['Departments', overview.departments], ['Locations', overview.locations], ['Vendors', overview.vendors], ['Licenses', overview.licenses]].map(([title, list]) => (
+                <div key={title}>
+                  <h4 className="text-sm font-semibold mb-2">{title} ({list.length})</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {list.length === 0 && <span className="text-sm text-muted-foreground">None</span>}
+                    {list.map((n, i) => <Badge key={i} variant="secondary">{n}</Badge>)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

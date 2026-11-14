@@ -4455,6 +4455,54 @@ async def update_tenant_subscription(tenant_id: str, tier_id: str, current_user:
     updated = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
     return Tenant(**updated)
 
+@api_router.get("/tenants/{tenant_id}/overview")
+async def get_tenant_overview(tenant_id: str, current_user: User = Depends(get_current_user)):
+    """Super-admin only: a snapshot of everything inside one tenant (people, assets, setup data)."""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Access denied")
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    tq = {"tenant_id": tenant_id}
+
+    users = await db.users.find(tq, {"_id": 0, "password_hash": 0}).to_list(500)
+    last_login: dict = {}
+    async for a in db.audit_log.find({**tq, "action": "login"}, {"_id": 0, "user_id": 1, "timestamp": 1}).sort("timestamp", -1).limit(2000):
+        last_login.setdefault(a.get("user_id"), a.get("timestamp"))
+    user_rows = [{
+        "name": u.get("name"), "email": u.get("email"), "role": u.get("role"),
+        "status": u.get("status", "active"), "last_login": last_login.get(u.get("id")),
+        "created_at": u.get("created_at"),
+    } for u in users]
+
+    status_counts: dict = {}
+    async for a in db.assets.find(tq, {"_id": 0, "status": 1}):
+        st = a.get("status") or "unknown"
+        status_counts[st] = status_counts.get(st, 0) + 1
+
+    async def names(coll: str, field: str = "name") -> list:
+        return [d.get(field) async for d in db[coll].find(tq, {"_id": 0, field: 1}).limit(200)]
+
+    counts = {}
+    for key, coll in [("assets", "assets"), ("users", "users"), ("departments", "departments"), ("locations", "locations"),
+                      ("vendors", "vendors"), ("licenses", "licenses"), ("products", "products"), ("groups", "groups"),
+                      ("tickets", "tickets"), ("orders", "orders")]:
+        counts[key] = await db[coll].count_documents(tq)
+    counts["open_tickets"] = await db.tickets.count_documents({**tq, "status": TicketStatus.OPEN})
+
+    tier = await db.subscription_tiers.find_one({"id": tenant.get("subscription_tier_id") or "tier-free"}, {"_id": 0, "name": 1})
+    return {
+        "tenant": {k: tenant.get(k) for k in ("id", "name", "domain", "subdomain", "status", "created_at", "subscription_started_at")},
+        "tier": (tier or {}).get("name"),
+        "counts": counts,
+        "assets_by_status": status_counts,
+        "users": user_rows,
+        "departments": await names("departments"),
+        "locations": await names("locations"),
+        "vendors": await names("vendors"),
+        "licenses": await names("licenses"),
+    }
+
 @api_router.get("/tenants/{tenant_id}/usage")
 async def get_tenant_usage(tenant_id: str, current_user: User = Depends(get_current_user)):
     if current_user.role == UserRole.EMPLOYEE:
