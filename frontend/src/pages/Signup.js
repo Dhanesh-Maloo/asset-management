@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Boxes, ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Boxes, ArrowRight, ShieldCheck, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -41,6 +41,7 @@ const labelStyle = {
 const Signup = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     company_name: '',
     admin_name: '',
@@ -273,11 +274,21 @@ const Signup = () => {
             {/* Password */}
             <div style={{ marginBottom: '24px' }}>
               <label style={labelStyle}>Password</label>
-              <input
-                id="admin_password" type="password" placeholder="At least 6 characters"
-                value={formData.admin_password} onChange={set('admin_password')}
-                required minLength={6} data-testid="signup-admin-password" style={inputStyle}
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="admin_password" type={showPassword ? 'text' : 'password'} placeholder="At least 6 characters"
+                  value={formData.admin_password} onChange={set('admin_password')}
+                  required minLength={6} data-testid="signup-admin-password" style={{ ...inputStyle, paddingRight: '42px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#64748b', display: 'flex' }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             <button
