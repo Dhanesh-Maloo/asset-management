@@ -6122,17 +6122,18 @@ async def get_dashboard_charts(current_user: User = Depends(get_current_user_hyb
     ticket_status_data = [{"name": s.replace("_", " ").title(), "value": ticket_status_counts[s]} for s in ticket_statuses if ticket_status_counts.get(s, 0) > 0]
 
     # License seat utilization
-    license_utilization = []
+    # (licences sharing a name are merged into one bar, e.g. the same product across tenants)
+    lic_merged: dict = {}
     for lic in licenses_raw:
-        total = lic.get("seats_total", 0)
-        used = lic.get("seats_used", 0)
-        available = max(0, total - used)
-        license_utilization.append({
-            "name": lic.get("name", "Unknown"),
-            "used": used,
-            "available": available,
-            "total": total,
-        })
+        name = lic.get("name", "Unknown")
+        key = name.strip().lower()
+        row = lic_merged.setdefault(key, {"name": name, "used": 0, "total": 0})
+        row["used"] += lic.get("seats_used", 0) or 0
+        row["total"] += lic.get("seats_total", 0) or 0
+    license_utilization = [
+        {"name": r["name"], "used": r["used"], "available": max(0, r["total"] - r["used"]), "total": r["total"]}
+        for r in lic_merged.values()
+    ]
 
     # Assets and purchase value per product category (names come from the global category list)
     cat_names = {c["key"]: c["name"] for c in category_docs}
