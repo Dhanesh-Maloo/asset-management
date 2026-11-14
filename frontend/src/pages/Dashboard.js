@@ -23,7 +23,8 @@ import {
   Sparkles,
   Activity,
   AlertTriangle,
-  CalendarClock
+  CalendarClock,
+  Wrench
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -254,6 +255,8 @@ const Dashboard = () => {
     { label: 'Total Assets', value: stats.total_assets || 0, icon: Laptop, tint: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400', link: '/assets' },
     { label: 'Assigned Assets', value: stats.assigned_assets || 0, icon: CheckCircle, tint: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', link: '/assets' },
     { label: 'Available Assets', value: stats.available_assets || 0, icon: Package, tint: 'bg-violet-500/10 text-violet-600 dark:text-violet-400', link: '/assets' },
+    { label: 'Under Maintenance / Repair', value: stats.maintenance_assets || 0, icon: Wrench, tint: 'bg-orange-500/10 text-orange-600 dark:text-orange-400', link: '/assets' },
+    ...((stats.other_assets || 0) > 0 ? [{ label: 'In Use / Other', value: stats.other_assets, icon: Laptop, tint: 'bg-slate-500/10 text-slate-600 dark:text-slate-400', link: '/assets' }] : []),
     { label: 'Open Tickets', value: stats.open_tickets || 0, icon: Ticket, tint: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', link: '/tickets' },
     { label: 'Pending Orders', value: stats.pending_orders || 0, icon: ShoppingCart, tint: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', link: '/orders' },
   ];

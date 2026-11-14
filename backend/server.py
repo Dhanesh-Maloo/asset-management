@@ -3190,10 +3190,11 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     if current_user.role == UserRole.EMPLOYEE:
         ticket_query["created_by"] = current_user.id
     
-    total_assets, assigned_assets, available_assets, open_tickets, pending_orders = await asyncio.gather(
+    total_assets, assigned_assets, available_assets, maintenance_assets, open_tickets, pending_orders = await asyncio.gather(
         db.assets.count_documents(query),
         db.assets.count_documents({**query, "status": AssetStatus.ASSIGNED}),
         db.assets.count_documents({**query, "status": AssetStatus.AVAILABLE}),
+        db.assets.count_documents({**query, "status": AssetStatus.UNDER_MAINTENANCE}),
         db.tickets.count_documents({**ticket_query, "status": TicketStatus.OPEN}),
         db.orders.count_documents({**query, "status": OrderStatus.PENDING}),
     )
@@ -3202,6 +3203,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         "total_assets": total_assets,
         "assigned_assets": assigned_assets,
         "available_assets": available_assets,
+        "maintenance_assets": maintenance_assets,
+        "other_assets": max(0, total_assets - assigned_assets - available_assets - maintenance_assets),
         "open_tickets": open_tickets,
         "pending_orders": pending_orders
     }
