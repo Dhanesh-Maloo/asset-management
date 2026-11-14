@@ -129,7 +129,7 @@ const Tickets = () => {
 
   const handleBulkDelete = async () => {
     try {
-      await axios.post(`${API}/tickets/bulk-delete`, { ticket_ids: selectedIds });
+      await axios.post(`${API}/tickets/bulk-delete`, { ids: selectedIds });
       toast.success(`${selectedIds.length} ticket(s) deleted`);
       setBulkDeleteDialogOpen(false);
       setSelectedIds([]);

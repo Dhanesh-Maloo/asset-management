@@ -92,7 +92,6 @@ export function EditAssetDialog({ open, onOpenChange, asset, onSaved }) {
                   <SelectItem value="available">Available</SelectItem>
                   <SelectItem value="assigned">Assigned</SelectItem>
                   <SelectItem value="under_maintenance">Under Maintenance</SelectItem>
-                  <SelectItem value="retired">Retired</SelectItem>
                   <SelectItem value="disposed">Disposed</SelectItem>
                 </SelectContent>
               </Select>
@@ -144,7 +143,7 @@ export function EditAssetDialog({ open, onOpenChange, asset, onSaved }) {
                 <SelectContent>
                   <SelectItem value="straight_line">Straight Line</SelectItem>
                   <SelectItem value="declining_balance">Declining Balance</SelectItem>
-                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="no_depreciation">None</SelectItem>
                 </SelectContent>
               </Select>
             </div>

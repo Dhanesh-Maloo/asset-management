@@ -962,7 +962,7 @@ const Assets = () => {
                     <SelectContent>
                       <SelectItem value="straight_line">Straight Line</SelectItem>
                       <SelectItem value="declining_balance">Declining Balance</SelectItem>
-                      <SelectItem value="none">No Depreciation</SelectItem>
+                      <SelectItem value="no_depreciation">No Depreciation</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -1470,6 +1470,19 @@ except ImportError:
     from fastapi.responses import JSONResponse as _DefaultResponse
 
 app = FastAPI(default_response_class=_DefaultResponse)
+
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """Return 422 details as one readable string so the frontend toast never receives an array."""
+    parts = []
+    for e in exc.errors():
+        loc = ".".join(str(x) for x in e.get("loc", [])[1:])
+        parts.append(f"{loc}: {e.get('msg', 'invalid')}" if loc else str(e.get("msg", "invalid")))
+    return JSONResponse(status_code=422, content={"detail": "; ".join(parts) or "Invalid input"})
 api_router = APIRouter(prefix="/api")
 
 # Health check endpoint
@@ -2077,6 +2090,11 @@ async def update_tenant(tenant_id: str, tenant_update: TenantUpdate, current_use
         raise HTTPException(status_code=403, detail="Access denied")
     
     update_data = tenant_update.model_dump(exclude_unset=True)
+    # Merge settings key by key so it never conflicts with settings.slack_webhook_url (and keeps other keys)
+    _settings_in = update_data.pop("settings", None)
+    if isinstance(_settings_in, dict):
+        for _k, _v in _settings_in.items():
+            update_data[f"settings.{_k}"] = _v
     # Handle slack_webhook_url → store in settings dict
     if "slack_webhook_url" in update_data:
         slack_url = update_data.pop("slack_webhook_url")
@@ -2560,11 +2578,11 @@ async def get_products(
 
     if search:
         query["$and"] = [{"$or": [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"category": {"$regex": search, "$options": "i"}}
+            {"name": {"$regex": re.escape(search), "$options": "i"}},
+            {"category": {"$regex": re.escape(search), "$options": "i"}}
         ]}]
     if category:
-        query["category"] = {"$regex": category, "$options": "i"}
+        query["category"] = {"$regex": re.escape(category), "$options": "i"}
     
     skip = (page - 1) * limit
     products = await db.products.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
@@ -2946,9 +2964,9 @@ async def get_assets(
             query["product_id"] = product_id
     if search:
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"serial_number": {"$regex": search, "$options": "i"}},
-            {"asset_tag": {"$regex": search, "$options": "i"}}
+            {"name": {"$regex": re.escape(search), "$options": "i"}},
+            {"serial_number": {"$regex": re.escape(search), "$options": "i"}},
+            {"asset_tag": {"$regex": re.escape(search), "$options": "i"}}
         ]
 
     skip = (page - 1) * limit
@@ -3072,7 +3090,7 @@ async def get_tickets(
     if priority:
         query["priority"] = priority
     if search:
-        query["title"] = {"$regex": search, "$options": "i"}
+        query["title"] = {"$regex": re.escape(search), "$options": "i"}
 
     skip = (page - 1) * limit
     tickets = await db.tickets.find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
@@ -3191,10 +3209,10 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         ticket_query["created_by"] = current_user.id
     
     total_assets, assigned_assets, available_assets, maintenance_assets, open_tickets, pending_orders = await asyncio.gather(
-        db.assets.count_documents(query),
-        db.assets.count_documents({**query, "status": AssetStatus.ASSIGNED}),
-        db.assets.count_documents({**query, "status": AssetStatus.AVAILABLE}),
-        db.assets.count_documents({**query, "status": AssetStatus.UNDER_MAINTENANCE}),
+        db.assets.count_documents({**query, "is_deleted": {"$ne": True}}),
+        db.assets.count_documents({**query, "is_deleted": {"$ne": True}, "status": AssetStatus.ASSIGNED}),
+        db.assets.count_documents({**query, "is_deleted": {"$ne": True}, "status": AssetStatus.AVAILABLE}),
+        db.assets.count_documents({**query, "is_deleted": {"$ne": True}, "status": AssetStatus.UNDER_MAINTENANCE}),
         db.tickets.count_documents({**ticket_query, "status": TicketStatus.OPEN}),
         db.orders.count_documents({**query, "status": OrderStatus.PENDING}),
     )
@@ -3465,6 +3483,11 @@ async def delete_user(user_id: str, current_user: User = Depends(get_current_use
             raise HTTPException(status_code=403, detail="Access denied")
         if target_user["role"] in ["tenant_admin", "super_admin"]:
             raise HTTPException(status_code=403, detail="Cannot delete admin accounts")
+
+    if await db.assets.find_one(_held_query(user_id), {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=409, detail="This user still holds assets. Offboard them (take back their assets) before deleting.")
+    if await db.tickets.find_one({"assigned_to": user_id, "status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=409, detail="This user has open tickets assigned. Reassign them before deleting.")
 
     await db.users.delete_one({"id": user_id})
     invalidate_user_cache(user_id)
@@ -3936,6 +3959,8 @@ async def return_asset(asset_id: str, return_data: AssetReturn, current_user: Us
     if expected_return:
         try:
             due_dt = datetime.fromisoformat(expected_return.replace("Z", "+00:00"))
+            if due_dt.tzinfo is None:
+                due_dt = due_dt.replace(tzinfo=timezone.utc)
             if now_dt > due_dt:
                 days_overdue = (now_dt - due_dt).days
                 fine_amount = round(days_overdue * return_data.daily_fine_rate, 2)
@@ -3981,6 +4006,8 @@ async def calculate_depreciation(asset_id: str, current_user: User = Depends(get
         return {"current_value": asset.get("purchase_price", 0), "depreciation": 0, "years": 0}
     
     purchase_date = datetime.fromisoformat(asset["purchase_date"].replace('Z', '+00:00'))
+    if purchase_date.tzinfo is None:
+        purchase_date = purchase_date.replace(tzinfo=timezone.utc)
     years_owned = (datetime.now(timezone.utc) - purchase_date).days / 365.25
     
     purchase_price = asset.get("purchase_price", 0)
